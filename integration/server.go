@@ -80,7 +80,7 @@ type ctxKey int
 const verifiedKey ctxKey = iota
 
 // Verify is net/http middleware that authenticates the inbound request and, on
-// success, calls next with the verified body available to DecodeAction. On any
+// success, calls next with the verified body available to DecodeBody. On any
 // failure it writes 401 with a JSON error and does not call next.
 func (v *Verifier) Verify(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -121,19 +121,40 @@ func (v *Verifier) Verify(next http.Handler) http.Handler {
 	})
 }
 
-// HandleAction is a convenience http.Handler that verifies the request, decodes
-// it as a "block.action" and calls fn. A nil error from fn yields 200; a non-nil
-// error yields 500 (the platform leaves the step parked and logs the failure).
-// It rejects a non-action type with 400.
-func (v *Verifier) HandleAction(fn ActionHandler) http.Handler {
+// Handler handles a verified inbound request. Returning nil yields 200; a
+// non-nil error yields 500 (the platform leaves any parked step waiting and logs
+// the failure).
+type Handler func(ctx context.Context, r *http.Request) error
+
+// InstallHandler handles a verified, decoded install request.
+type InstallHandler func(ctx context.Context, req InstallRequest) error
+
+// Handle wraps fn with signature verification. The action request body is
+// author-designed (see action_request_template), so fn reads it with DecodeBody
+// into its own struct. Use it for a version's action_url endpoint.
+func (v *Verifier) Handle(fn Handler) http.Handler {
 	return v.Verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		req, err := DecodeAction(r)
-		if err != nil {
+		if err := fn(r.Context(), r); err != nil {
+			v.log.Error("integration handler failed", LogF("error", err.Error()))
+			writeJSONError(w, http.StatusInternalServerError, "handler failed")
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+}
+
+// HandleInstall verifies the request, decodes the fixed install body and calls
+// fn. Use it for the version's install_url endpoint. A nil error yields 200; a
+// non-nil error yields 500.
+func (v *Verifier) HandleInstall(fn InstallHandler) http.Handler {
+	return v.Verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req InstallRequest
+		if err := DecodeBody(r, &req); err != nil {
 			writeJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if err := fn(r.Context(), req); err != nil {
-			v.log.Error("integration action handler failed", LogF("error", err.Error()))
+			v.log.Error("integration install handler failed", LogF("error", err.Error()))
 			writeJSONError(w, http.StatusInternalServerError, "handler failed")
 			return
 		}
@@ -150,83 +171,30 @@ func (v *Verifier) reject(w http.ResponseWriter, stage string, err error) {
 	writeJSONError(w, http.StatusUnauthorized, "signature verification failed")
 }
 
-// ActionHandler handles a verified inbound integrationAction request.
-type ActionHandler func(ctx context.Context, req ActionRequest) error
-
-// DecodeAction reads the verified body left by Verifier.Verify and decodes it as
-// a "block.action" envelope. It errors if used outside a Verify chain or if the
-// envelope type is not TypeAction.
-func DecodeAction(r *http.Request) (ActionRequest, error) {
+// DecodeBody unmarshals the verified request body left by Verifier.Verify into
+// dst. It errors if used outside a Verify chain. Embed integration.ExecutionContext
+// in dst wherever the action_request_template references {{context}} so the
+// decoded value can be passed to StepsClient.Resolve.
+func DecodeBody(r *http.Request, dst any) error {
 	vc, ok := r.Context().Value(verifiedKey).(verifiedContext)
 	if !ok {
-		return ActionRequest{}, fmt.Errorf("integration: request was not verified (wrap the handler with Verifier.Verify)")
+		return fmt.Errorf("integration: request was not verified (wrap the handler with Verifier.Verify)")
 	}
-	var env Envelope
-	if err := json.Unmarshal(vc.body, &env); err != nil {
-		return ActionRequest{}, fmt.Errorf("integration: decode envelope: %w", err)
+	if err := json.Unmarshal(vc.body, dst); err != nil {
+		return fmt.Errorf("integration: decode body: %w", err)
 	}
-	if env.Type != TypeAction {
-		return ActionRequest{}, fmt.Errorf("integration: expected type %q, got %q", TypeAction, env.Type)
-	}
-	var payload ActionPayload
-	if err := json.Unmarshal(env.Payload, &payload); err != nil {
-		return ActionRequest{}, fmt.Errorf("integration: decode action payload: %w", err)
-	}
-	return ActionRequest{Type: env.Type, KeyID: vc.keyID, Payload: payload}, nil
+	return nil
 }
 
-// Mux dispatches verified inbound requests by envelope type onto registered
-// handlers. Use it when a single endpoint serves several inbound types; wrap it
-// with Verifier.Verify. For the common one-block-per-endpoint case, prefer
-// Verifier.HandleAction.
-type Mux struct {
-	action ActionHandler
-	log    Logger
-}
-
-// NewMux returns an empty Mux.
-func NewMux() *Mux { return &Mux{log: NopLogger()} }
-
-// OnAction registers the handler for "block.action" requests. The last
-// registration wins.
-func (m *Mux) OnAction(fn ActionHandler) *Mux {
-	m.action = fn
-	return m
-}
-
-// ServeHTTP dispatches a verified request. It must be wrapped with
-// Verifier.Verify so the verified body is available.
-func (m *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// VerifiedBody returns the raw verified request body left by Verifier.Verify and
+// the platform signing key id that authenticated it. ok is false if used outside
+// a Verify chain.
+func VerifiedBody(r *http.Request) (body []byte, keyID string, ok bool) {
 	vc, ok := r.Context().Value(verifiedKey).(verifiedContext)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "request was not verified")
-		return
+		return nil, "", false
 	}
-	var env Envelope
-	if err := json.Unmarshal(vc.body, &env); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "decode envelope")
-		return
-	}
-	switch env.Type {
-	case TypeAction:
-		if m.action == nil {
-			writeJSONError(w, http.StatusNotImplemented, "no handler for block.action")
-			return
-		}
-		req, err := DecodeAction(r)
-		if err != nil {
-			writeJSONError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := m.action(r.Context(), req); err != nil {
-			m.log.Error("integration action handler failed", LogF("error", err.Error()))
-			writeJSONError(w, http.StatusInternalServerError, "handler failed")
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	default:
-		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("unknown inbound type %q", env.Type))
-	}
+	return vc.body, vc.keyID, true
 }
 
 func writeJSONError(w http.ResponseWriter, status int, message string) {

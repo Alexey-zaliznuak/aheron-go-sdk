@@ -1,0 +1,161 @@
+version: '3'
+
+vars:
+  REMOTE: origin
+  MAIN_BRANCH: main
+  MODULE:
+    sh: go list -m
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  fmt:
+    desc: Format Go source files
+    cmds:
+      - gofmt -w .
+
+  tidy:
+    desc: Tidy Go module dependencies
+    cmds:
+      - go mod tidy
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./...
+
+  check:
+    desc: Run all local checks (fmt, tidy, vet, test)
+    cmds:
+      - task: fmt
+      - task: tidy
+      - task: vet
+      - task: test
+
+  version:
+    desc: Show the current (latest) semver tag
+    silent: true
+    cmds:
+      - 'git describe --tags --match "v[0-9]*.[0-9]*.[0-9]*" --abbrev=0 2>/dev/null || echo v0.0.0'
+
+  release:preview:
+    desc: 'Show what the next version would be. Usage: task release:preview [BUMP=patch|minor|major]'
+    silent: true
+    vars:
+      BUMP: '{{.BUMP | default "patch"}}'
+    cmds:
+      - |
+        set -eu
+        latest=$(git describe --tags --match "v[0-9]*.[0-9]*.[0-9]*" --abbrev=0 2>/dev/null || echo v0.0.0)
+        v=${latest#v}
+        major=${v%%.*}; rest=${v#*.}; minor=${rest%%.*}; patch=${rest#*.}
+        case "{{.BUMP}}" in
+          major) major=$((major+1)); minor=0; patch=0 ;;
+          minor) minor=$((minor+1)); patch=0 ;;
+          patch) patch=$((patch+1)) ;;
+          *) echo "unknown BUMP '{{.BUMP}}' (use patch|minor|major)" >&2; exit 1 ;;
+        esac
+        echo "current: $latest  ->  next ({{.BUMP}}): v${major}.${minor}.${patch}"
+
+  push:
+    desc: Push the current branch and all tags to the remote
+    cmds:
+      - git push {{.REMOTE}} HEAD
+      - git push {{.REMOTE}} --tags
+
+  release:
+    desc: 'Tag and push a new semver release. Usage: task release [BUMP=patch|minor|major] or task release VERSION=v1.2.3'
+    deps: [vet, test]
+    vars:
+      BUMP: '{{.BUMP | default "patch"}}'
+      VERSION: '{{.VERSION | default ""}}'
+    cmds:
+      - |
+        set -eu
+
+        REMOTE="{{.REMOTE}}"
+        MAIN_BRANCH="{{.MAIN_BRANCH}}"
+        MODULE="{{.MODULE}}"
+        BUMP="{{.BUMP}}"
+        FORCED="{{.VERSION}}"
+
+        # --- guards: only release a clean, up-to-date main ---
+        branch=$(git rev-parse --abbrev-ref HEAD)
+        if [ "$branch" != "$MAIN_BRANCH" ]; then
+          echo "release must run on '$MAIN_BRANCH' (current: '$branch')" >&2
+          exit 1
+        fi
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "working tree is dirty; commit or stash your changes first" >&2
+          exit 1
+        fi
+        git fetch "$REMOTE" --tags --quiet
+        if [ -n "$(git rev-list HEAD..$REMOTE/$MAIN_BRANCH 2>/dev/null)" ]; then
+          echo "local $MAIN_BRANCH is behind $REMOTE/$MAIN_BRANCH; pull first" >&2
+          exit 1
+        fi
+
+        # --- compute next version ---
+        if [ -n "$FORCED" ]; then
+          next="$FORCED"
+        else
+          latest=$(git describe --tags --match "v[0-9]*.[0-9]*.[0-9]*" --abbrev=0 2>/dev/null || echo v0.0.0)
+          v=${latest#v}
+          major=${v%%.*}; rest=${v#*.}; minor=${rest%%.*}; patch=${rest#*.}
+          case "$BUMP" in
+            major) major=$((major+1)); minor=0; patch=0 ;;
+            minor) minor=$((minor+1)); patch=0 ;;
+            patch) patch=$((patch+1)) ;;
+            *) echo "unknown BUMP '$BUMP' (use patch|minor|major)" >&2; exit 1 ;;
+          esac
+          next="v${major}.${minor}.${patch}"
+        fi
+
+        # --- validate & ensure the tag is new ---
+        case "$next" in
+          v[0-9]*.[0-9]*.[0-9]*) ;;
+          *) echo "invalid version '$next' (expected vMAJOR.MINOR.PATCH)" >&2; exit 1 ;;
+        esac
+        if git rev-parse "$next" >/dev/null 2>&1; then
+          echo "tag '$next' already exists" >&2
+          exit 1
+        fi
+
+        echo "Releasing $MODULE $next ..."
+        git tag -a "$next" -m "Release $next"
+        git push "$REMOTE" "$MAIN_BRANCH"
+        git push "$REMOTE" "$next"
+        echo "Tagged and pushed $next"
+
+        # --- prime the Go module proxy so 'go get' sees it immediately ---
+        echo "Priming Go module proxy ..."
+        GOPROXY=proxy.golang.org GOFLAGS= go list -m "$MODULE@$next" >/dev/null 2>&1 \
+          || echo "proxy prime skipped (non-fatal)"
+        echo "Done. Consume it with: go get $MODULE@$next"
+
+  release:patch:
+    desc: Release the next patch version (vX.Y.Z+1)
+    cmds:
+      - task: release
+        vars: { BUMP: patch }
+
+  release:minor:
+    desc: Release the next minor version (vX.Y+1.0)
+    cmds:
+      - task: release
+        vars: { BUMP: minor }
+
+  release:major:
+    desc: Release the next major version (vX+1.0.0)
+    cmds:
+      - task: release
+        vars: { BUMP: major }

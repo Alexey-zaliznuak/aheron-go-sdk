@@ -6,9 +6,9 @@
 //     trigger, list trigger instances — plus a CRM client for reading/writing
 //     subject data with a project API key. Every signed call is authenticated
 //     with the integration's own Ed25519 private key.
-//   - Inbound (platform -> integration): a Verifier and Mux that authenticate
-//     and decode the signed requests the platform sends to the integration
-//     backend, so handlers receive typed payloads instead of raw HTTP.
+//   - Inbound (platform -> integration): a Verifier that authenticates the
+//     signed requests the platform sends to the integration backend (install and
+//     action), so handlers run only on verified bodies they decode themselves.
 //
 // Construct a Client with New and a Config. Sensible defaults are applied for
 // URLs, timeout, retries and logging, so the minimal setup is just the

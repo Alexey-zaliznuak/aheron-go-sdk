@@ -39,7 +39,7 @@ func signInbound(t *testing.T, priv ed25519.PrivateKey, kid string, body []byte)
 	return h
 }
 
-func TestInboundVerifyAndDecode(t *testing.T) {
+func TestInboundVerifyAndDecodeAction(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	const kid = "aheron-int-202606-01"
 	jwks := platformJWKS(kid, pub)
@@ -50,20 +50,25 @@ func TestInboundVerifyAndDecode(t *testing.T) {
 		t.Fatalf("verifier: %v", err)
 	}
 
-	envelope := `{"type":"block.action","payload":{` +
-		`"settings":{"outputs":["ok","fail"]},` +
-		`"subject":{"id":"subj-1"},"project":{"id":"proj-1"},` +
-		`"vars":{"greeting":"hi"},"tags":["a"],` +
-		`"resolve":{"url":"https://example.test/resolve","executionContextId":"ctx-1","contextVersion":7,"outputs":["ok","fail"]}}}`
-	body := []byte(envelope)
+	// An author-designed action body (matches the echo example's template).
+	body := []byte(`{"context":{"id":"ctx-1","version":7,"inputKey":"in"},` +
+		`"actionKey":"open_course","settings":{"outputs":["ok","fail"]},` +
+		`"vars":{"project":{},"subject":{"name":"a"}},"integrationContext":{}}`)
 
-	var captured ActionRequest
-	handler := verifier.HandleAction(func(_ context.Context, req ActionRequest) error {
-		captured = req
-		return nil
+	type actionBody struct {
+		Context   ExecutionContext `json:"context"`
+		ActionKey string           `json:"actionKey"`
+		Settings  struct {
+			Outputs []string `json:"outputs"`
+		} `json:"settings"`
+	}
+
+	var captured actionBody
+	handler := verifier.Handle(func(_ context.Context, r *http.Request) error {
+		return DecodeBody(r, &captured)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/blocks/echo", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/blocks/action", bytes.NewReader(body))
 	req.Header = signInbound(t, priv, kid, body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -71,18 +76,43 @@ func TestInboundVerifyAndDecode(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	if captured.Payload.Subject.ID != "subj-1" || captured.Payload.Resolve.ExecutionContextID != "ctx-1" {
-		t.Fatalf("decoded payload mismatch: %+v", captured.Payload)
+	if captured.Context.ID != "ctx-1" || captured.Context.Version != 7 {
+		t.Fatalf("decoded context mismatch: %+v", captured.Context)
 	}
-	if captured.Payload.Resolve.ContextVersion != 7 {
-		t.Fatalf("context version mismatch: %d", captured.Payload.Resolve.ContextVersion)
+	if captured.ActionKey != "open_course" {
+		t.Fatalf("actionKey mismatch: %q", captured.ActionKey)
 	}
-	if captured.KeyID != kid {
-		t.Fatalf("kid mismatch: %q", captured.KeyID)
+	if len(captured.Settings.Outputs) != 2 || captured.Settings.Outputs[0] != "ok" {
+		t.Fatalf("outputs mismatch: %v", captured.Settings.Outputs)
 	}
-	rp := captured.Resolve("ok", nil)
-	if rp.URL != "https://example.test/resolve" {
-		t.Fatalf("resolve url not carried: %q", rp.URL)
+}
+
+func TestInboundVerifyAndDecodeInstall(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	const kid = "k1"
+	jwks := platformJWKS(kid, pub)
+	defer jwks.Close()
+
+	verifier, _ := NewVerifier(VerifierConfig{JWKSURL: jwks.URL, HTTPClient: jwks.Client()})
+
+	body := []byte(`{"projectId":"proj-1","projectApiKey":"ahr_proj_secret"}`)
+
+	var captured InstallRequest
+	handler := verifier.HandleInstall(func(_ context.Context, req InstallRequest) error {
+		captured = req
+		return nil
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/install", bytes.NewReader(body))
+	req.Header = signInbound(t, priv, kid, body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if captured.ProjectID != "proj-1" || captured.ProjectAPIKey != "ahr_proj_secret" {
+		t.Fatalf("decoded install mismatch: %+v", captured)
 	}
 }
 
@@ -93,12 +123,12 @@ func TestInboundRejectsTamperedSignature(t *testing.T) {
 	defer jwks.Close()
 
 	verifier, _ := NewVerifier(VerifierConfig{JWKSURL: jwks.URL, HTTPClient: jwks.Client()})
-	handler := verifier.HandleAction(func(context.Context, ActionRequest) error { return nil })
+	handler := verifier.Handle(func(context.Context, *http.Request) error { return nil })
 
-	body := []byte(`{"type":"block.action","payload":{}}`)
+	body := []byte(`{"actionKey":"x"}`)
 	header := signInbound(t, priv, kid, body)
 	// Tamper: change the body after signing.
-	tampered := []byte(`{"type":"block.action","payload":{"subject":{"id":"x"}}}`)
+	tampered := []byte(`{"actionKey":"y"}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/x", bytes.NewReader(tampered))
 	req.Header = header
@@ -134,11 +164,7 @@ func TestOutboundResolveIsSigned(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	err = c.Steps.Resolve(context.Background(), ResolveParams{
-		ExecutionContextID: "ctx-9",
-		ContextVersion:     3,
-		Output:             "ok",
-	})
+	err = c.Steps.Resolve(context.Background(), ExecutionContext{ID: "ctx-9", Version: 3}, "ok", nil)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -159,7 +185,7 @@ func TestResolveRequiresSigner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	if err := c.Steps.Resolve(context.Background(), ResolveParams{ExecutionContextID: "x", Output: "ok"}); err == nil {
+	if err := c.Steps.Resolve(context.Background(), ExecutionContext{ID: "x"}, "ok", nil); err == nil {
 		t.Fatal("expected error when no signer configured")
 	}
 }
