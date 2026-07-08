@@ -318,6 +318,75 @@ func (c *CRMClient) EnsureVariableDefinition(ctx context.Context, projectID stri
 	return nil
 }
 
+// CreateIntegrationVariableDefinition creates an integration-owned variable
+// definition in a project, owned by integrationID. Unlike
+// CreateVariableDefinition (which creates a project-owned definition), the
+// resulting definition lives in the integration's own owner namespace: its key
+// may coincide with a project variable's key or another integration's key
+// without conflicting. integrationID must be this integration's platform id.
+//
+// It returns *APIError with status 409 when a definition with the same key
+// already exists for this integration; use EnsureIntegrationVariableDefinition
+// when you want that treated as success.
+func (c *CRMClient) CreateIntegrationVariableDefinition(ctx context.Context, projectID, integrationID string, p CreateVariableDefinitionParams) (VariableDefinition, error) {
+	if projectID == "" || integrationID == "" {
+		return VariableDefinition{}, fmt.Errorf("integration: CreateIntegrationVariableDefinition requires projectID and integrationID")
+	}
+	if p.Name == "" || p.Key == "" {
+		return VariableDefinition{}, fmt.Errorf("integration: CreateIntegrationVariableDefinition requires name and key")
+	}
+
+	var defaultRaw json.RawMessage
+	if p.DefaultValue != nil {
+		raw, err := json.Marshal(p.DefaultValue)
+		if err != nil {
+			return VariableDefinition{}, fmt.Errorf("integration: marshal default value: %w", err)
+		}
+		defaultRaw = raw
+	}
+
+	body, err := json.Marshal(createVariableDefinitionBody{
+		Name:         p.Name,
+		Key:          p.Key,
+		Type:         p.Type,
+		Description:  p.Description,
+		DefaultValue: defaultRaw,
+	})
+	if err != nil {
+		return VariableDefinition{}, fmt.Errorf("integration: marshal variable definition: %w", err)
+	}
+
+	req, err := c.bearerRequest(http.MethodPost, "/projects/"+projectID+"/integrations/"+integrationID+"/variable-definitions", nil, body, false)
+	if err != nil {
+		return VariableDefinition{}, err
+	}
+	resp, err := c.http.Do(ctx, req)
+	if err != nil {
+		return VariableDefinition{}, err
+	}
+	var out VariableDefinition
+	if err := json.Unmarshal(resp.Body, &out); err != nil {
+		return VariableDefinition{}, fmt.Errorf("integration: decode variable definition: %w", err)
+	}
+	return out, nil
+}
+
+// EnsureIntegrationVariableDefinition creates an integration-owned variable
+// definition, treating an already-exists conflict (HTTP 409) as success. It is
+// idempotent, so it is safe to call repeatedly (for example on every install or
+// process start) to guarantee a definition exists before upserting subjects by
+// its key. It does not update an existing definition.
+func (c *CRMClient) EnsureIntegrationVariableDefinition(ctx context.Context, projectID, integrationID string, p CreateVariableDefinitionParams) error {
+	if _, err := c.CreateIntegrationVariableDefinition(ctx, projectID, integrationID, p); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Status == http.StatusConflict {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 func (c *CRMClient) bearerRequest(method, path string, query map[string]string, body []byte, idempotent bool) (httpclient.Request, error) {
 	if c.apiKey == "" {
 		return httpclient.Request{}, errNoAPIKey
