@@ -133,6 +133,17 @@ func main() {
 **Данные** (`client.CRM`, по project API key):
 
 - `UpsertSubject`, `GetSubject`, `ListSubjectVariables`, `SetSubjectVariables`.
+- `CreateVariableDefinition`, `EnsureVariableDefinition` — объявление subject-переменных
+  проекта. `Ensure` идемпотентен (конфликт `409` = «уже есть»), поэтому его удобно
+  звать один раз на install/старт, чтобы гарантировать переменную перед upsert'ом
+  субъектов по её ключу.
+- `client.CRM.WithAPIKey(projectKey)` — дешёвая копия клиента с другим project API
+  key поверх общего транспорта. Нужна, когда один процесс интеграции работает от
+  имени многих проектов (у каждого свой ключ, выданный на install): держите один
+  базовый клиент без ключа и деривируйте `WithAPIKey(...)` на каждый вызов.
+
+Ветвление по ответу CRM: `integration.IsUnauthorized(err)` (401/403) и
+`integration.StatusCode(err)` (точный статус `*APIError`, напр. `409`).
 
 **Входящее** (`Verifier`):
 

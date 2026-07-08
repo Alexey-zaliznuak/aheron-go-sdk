@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -17,6 +18,20 @@ import (
 type CRMClient struct {
 	http   *httpclient.Client
 	apiKey string
+}
+
+// WithAPIKey returns a copy of the client that authenticates with apiKey instead
+// of the key configured on the parent Client. It shares the underlying HTTP
+// transport, so it is cheap to derive per request or per project.
+//
+// Use it when a single integration process acts on behalf of many projects, each
+// with its own project API key (for example one delivered per project on
+// install): keep one keyless base client and derive c.WithAPIKey(projectKey) at
+// call time, rather than constructing a full Client per project.
+func (c *CRMClient) WithAPIKey(apiKey string) *CRMClient {
+	clone := *c
+	clone.apiKey = apiKey
+	return &clone
 }
 
 // Field is a single (field, value) pair used in subject upserts. Field is a
@@ -205,6 +220,102 @@ func (c *CRMClient) SetSubjectVariables(ctx context.Context, projectID, subjectI
 		}
 	}
 	return out, nil
+}
+
+// VariableDefinition is a subject variable definition in a project: a typed,
+// named slot (identified by Key) that subjects can carry values for.
+type VariableDefinition struct {
+	ID           string          `json:"id"`
+	ProjectID    string          `json:"projectId"`
+	Name         string          `json:"name"`
+	Key          string          `json:"key"`
+	Type         string          `json:"type"`
+	Description  *string         `json:"description,omitempty"`
+	DefaultValue json.RawMessage `json:"defaultValue,omitempty"`
+	// OwnerType is "project" or "integration".
+	OwnerType string    `json:"ownerType"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// CreateVariableDefinitionParams is the payload to create a subject variable
+// definition. Name and Key are required. Type defaults to "string" server-side
+// when empty. DefaultValue, when non-nil, is JSON-encoded.
+type CreateVariableDefinitionParams struct {
+	Name         string
+	Key          string
+	Type         string
+	Description  *string
+	DefaultValue any
+}
+
+type createVariableDefinitionBody struct {
+	Name         string          `json:"name"`
+	Key          string          `json:"key"`
+	Type         string          `json:"type,omitempty"`
+	Description  *string         `json:"description,omitempty"`
+	DefaultValue json.RawMessage `json:"defaultValue,omitempty"`
+}
+
+// CreateVariableDefinition creates a subject variable definition in a project. It
+// returns *APIError with status 409 when a definition with the same key already
+// exists; use EnsureVariableDefinition when you want that treated as success.
+func (c *CRMClient) CreateVariableDefinition(ctx context.Context, projectID string, p CreateVariableDefinitionParams) (VariableDefinition, error) {
+	if projectID == "" {
+		return VariableDefinition{}, fmt.Errorf("integration: CreateVariableDefinition requires projectID")
+	}
+	if p.Name == "" || p.Key == "" {
+		return VariableDefinition{}, fmt.Errorf("integration: CreateVariableDefinition requires name and key")
+	}
+
+	var defaultRaw json.RawMessage
+	if p.DefaultValue != nil {
+		raw, err := json.Marshal(p.DefaultValue)
+		if err != nil {
+			return VariableDefinition{}, fmt.Errorf("integration: marshal default value: %w", err)
+		}
+		defaultRaw = raw
+	}
+
+	body, err := json.Marshal(createVariableDefinitionBody{
+		Name:         p.Name,
+		Key:          p.Key,
+		Type:         p.Type,
+		Description:  p.Description,
+		DefaultValue: defaultRaw,
+	})
+	if err != nil {
+		return VariableDefinition{}, fmt.Errorf("integration: marshal variable definition: %w", err)
+	}
+
+	req, err := c.bearerRequest(http.MethodPost, "/projects/"+projectID+"/variable-definitions", nil, body, false)
+	if err != nil {
+		return VariableDefinition{}, err
+	}
+	resp, err := c.http.Do(ctx, req)
+	if err != nil {
+		return VariableDefinition{}, err
+	}
+	var out VariableDefinition
+	if err := json.Unmarshal(resp.Body, &out); err != nil {
+		return VariableDefinition{}, fmt.Errorf("integration: decode variable definition: %w", err)
+	}
+	return out, nil
+}
+
+// EnsureVariableDefinition creates a variable definition, treating an
+// already-exists conflict (HTTP 409) as success. It is idempotent, so it is safe
+// to call repeatedly (for example on every install or process start) to
+// guarantee a definition exists before upserting subjects by its key. It does
+// not update an existing definition.
+func (c *CRMClient) EnsureVariableDefinition(ctx context.Context, projectID string, p CreateVariableDefinitionParams) error {
+	if _, err := c.CreateVariableDefinition(ctx, projectID, p); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Status == http.StatusConflict {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (c *CRMClient) bearerRequest(method, path string, query map[string]string, body []byte, idempotent bool) (httpclient.Request, error) {
