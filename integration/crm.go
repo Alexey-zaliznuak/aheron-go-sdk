@@ -74,6 +74,13 @@ type UpsertSubjectParams struct {
 	// OnMultiple controls behavior when Find matches more than one subject:
 	// "conflict" (default) fails; "first" updates the oldest match.
 	OnMultiple string
+	// IntegrationID scopes bare field-key resolution to an integration: a key in
+	// Find/Create/Update first matches that integration's own variable before
+	// falling back to a project variable. Set it to this integration's platform
+	// id to target an integration-owned variable (created via
+	// CreateIntegrationVariableDefinition) unambiguously even when a project
+	// variable shares the key. Empty keeps the default project-first resolution.
+	IntegrationID string
 }
 
 // UpsertSubjectResult reports whether a new subject was created and returns the
@@ -90,10 +97,11 @@ type fieldWire struct {
 }
 
 type upsertSubjectBody struct {
-	Find       []fieldWire `json:"find"`
-	Create     []fieldWire `json:"create,omitempty"`
-	Update     []fieldWire `json:"update,omitempty"`
-	OnMultiple string      `json:"onMultiple,omitempty"`
+	Find          []fieldWire `json:"find"`
+	Create        []fieldWire `json:"create,omitempty"`
+	Update        []fieldWire `json:"update,omitempty"`
+	OnMultiple    string      `json:"onMultiple,omitempty"`
+	IntegrationID string      `json:"integrationId,omitempty"`
 }
 
 // UpsertSubject creates or updates a subject. It is the primary way an
@@ -115,7 +123,7 @@ func (c *CRMClient) UpsertSubject(ctx context.Context, projectID string, p Upser
 		return UpsertSubjectResult{}, err
 	}
 
-	body, err := json.Marshal(upsertSubjectBody{Find: find, Create: create, Update: update, OnMultiple: p.OnMultiple})
+	body, err := json.Marshal(upsertSubjectBody{Find: find, Create: create, Update: update, OnMultiple: p.OnMultiple, IntegrationID: p.IntegrationID})
 	if err != nil {
 		return UpsertSubjectResult{}, fmt.Errorf("integration: marshal upsert: %w", err)
 	}
