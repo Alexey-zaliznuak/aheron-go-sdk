@@ -151,7 +151,9 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 		rr.SetQueryParam(k, v)
 	}
 	if req.Body != nil {
-		rr.SetHeader("Content-Type", "application/json")
+		if _, ok := req.Headers["Content-Type"]; !ok {
+			rr.SetHeader("Content-Type", "application/json")
+		}
 		rr.SetBody(req.Body)
 	}
 

@@ -35,6 +35,7 @@ import (
 const (
 	DefaultExecutionURL = "https://aheron.pro"
 	DefaultCRMURL       = "https://aheron.pro/api/crm"
+	DefaultMediaURL     = "https://aheron.pro/api/media"
 )
 
 // Config configures a Client. IntegrationID and PrivateKey are required for the
@@ -57,6 +58,9 @@ type Config struct {
 	// CRMURL is the base URL of the crm-backend public API. Defaults to
 	// DefaultCRMURL.
 	CRMURL string
+	// MediaURL is the base URL of the media-service public API. Defaults to
+	// DefaultMediaURL.
+	MediaURL string
 
 	// Transport tuning. Zero values fall back to the httpclient defaults.
 	Timeout      time.Duration
@@ -78,6 +82,9 @@ type Client struct {
 	// CRM reads and writes subject data with the project API key. It is nil-safe:
 	// calling it without an APIKey configured returns an error.
 	CRM *CRMClient
+	// Files stores and retrieves project media files with the project API key.
+	// It is nil-safe: calling it without an APIKey configured returns an error.
+	Files *FilesClient
 
 	integrationID string
 	signer        *sign.Signer
@@ -93,6 +100,9 @@ func New(cfg Config) (*Client, error) {
 	}
 	if cfg.CRMURL == "" {
 		cfg.CRMURL = DefaultCRMURL
+	}
+	if cfg.MediaURL == "" {
+		cfg.MediaURL = DefaultMediaURL
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = NopLogger()
@@ -120,6 +130,7 @@ func New(cfg Config) (*Client, error) {
 
 	execHTTP := httpclient.New(transportCfg(cfg.ExecutionURL))
 	crmHTTP := httpclient.New(transportCfg(cfg.CRMURL))
+	mediaHTTP := httpclient.New(transportCfg(cfg.MediaURL))
 
 	c := &Client{
 		integrationID: cfg.IntegrationID,
@@ -128,6 +139,7 @@ func New(cfg Config) (*Client, error) {
 	c.Steps = &StepsClient{http: execHTTP, id: cfg.IntegrationID, signer: signer}
 	c.Triggers = &TriggersClient{http: execHTTP, id: cfg.IntegrationID, signer: signer}
 	c.CRM = &CRMClient{http: crmHTTP, apiKey: cfg.APIKey}
+	c.Files = &FilesClient{http: mediaHTTP, apiKey: cfg.APIKey}
 	return c, nil
 }
 

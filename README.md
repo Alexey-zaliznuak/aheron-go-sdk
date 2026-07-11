@@ -112,6 +112,7 @@ func main() {
 | `APIKey`                                                   | project API key (`ahr_proj_...`) для CRM                             | —                            |
 | `ExecutionURL`                                             | origin платформы; эндпоинты интеграций под `/api/integrations/...`   | `https://aheron.pro`         |
 | `CRMURL`                                                   | база CRM с префиксом шлюза `/api/crm`; вызовы бьют в `/projects/...` | `https://aheron.pro/api/crm` |
+| `MediaURL`                                                 | база media-service с префиксом шлюза `/api/media` (файлы проекта)    | `https://aheron.pro/api/media` |
 | `Timeout` / `RetryCount` / `RetryWaitMin` / `RetryWaitMax` | транспорт                                                            | 30s / 2 / 0.5s / 5s          |
 | `Logger`                                                   | реализация `integration.Logger`                                      | no-op                        |
 
@@ -145,6 +146,19 @@ func main() {
 Ветвление по ответу CRM: `integration.IsUnauthorized(err)` (401/403) и
 `integration.StatusCode(err)` (точный статус `*APIError`, напр. `409`).
 
+**Файлы** (`client.Files`, по project API key, платформенный media-service):
+
+- `Upload(ctx, fileName, mimeType, content)` — сохранить файл и получить `File`
+  (в т.ч. `URL` — стабильную публичную ссылку). Байты **не идут через media-service**:
+  SDK сам получает presigned-ссылку, PUT'ит контент напрямую в объектное хранилище
+  (с `Content-MD5` для целостности), затем финализирует; хэш контента сервис берёт
+  из S3 ETag. Дедуп по содержимому в пределах проекта.
+- `Replace(ctx, fileID, mimeType, content)` — заменить содержимое файла, сохранив его id.
+- `List(ctx, ListParams{Before, Limit})`, `Get(ctx, fileID)`, `Rename(ctx, fileID, name)`,
+  `Delete(ctx, fileID)` (soft-delete), `Usage(ctx)` — снимок хранимого объёма проекта.
+- `client.Files.WithAPIKey(projectKey)` — как и у CRM, дешёвая копия под другой
+  project API key (мульти-проектный процесс).
+
 **Входящее** (`Verifier`):
 
 - `verifier.Verify(next)` — middleware `net/http`: проверка подписи + timestamp.
@@ -166,3 +180,5 @@ SDK не тянет конкретный логгер: передайте сво
   эндпоинты под `/api/integrations/...`).
 - CRM ходит через префикс шлюза `/api/crm`. Если ваш деплой отдаёт CRM по
   другому адресу — задайте `CRMURL` соответственно.
+- Файлы (`client.Files`) ходят через префикс шлюза `/api/media`. Если media-service
+  отдаётся по другому адресу — задайте `MediaURL` соответственно.

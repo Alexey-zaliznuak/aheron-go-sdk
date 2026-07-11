@@ -2,10 +2,10 @@
 // endpoints:
 //
 //   - /install     receives {projectId, projectApiKey} once, when the
-//                  integration is installed into a project, and stores the key.
+//     integration is installed into a project, and stores the key.
 //   - /blocks/action receives an integrationAction request whose body shape is
-//                  designed by the integration author (action_request_template).
-//                  It resolves the parked step through its first declared output.
+//     designed by the integration author (action_request_template).
+//     It resolves the parked step through its first declared output.
 //
 // The action_request_template configured on the platform for this example is:
 //
