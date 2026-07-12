@@ -148,14 +148,25 @@ func main() {
 
 **Файлы** (`client.Files`, по project API key, платформенный media-service):
 
-- `Upload(ctx, fileName, mimeType, content)` — сохранить файл и получить `File`
-  (в т.ч. `URL` — стабильную публичную ссылку). Байты **не идут через media-service**:
+- `Upload(ctx, fileName, mimeType, content)` — сохранить файл в пользовательскую
+  медиатеку (`library`) и получить `File` (в т.ч. `Namespace` и `URL` — стабильную
+  публичную ссылку). Байты **не идут через media-service**:
   SDK сам получает presigned-ссылку, PUT'ит контент напрямую в объектное хранилище
   (с `Content-MD5` для целостности), затем финализирует; хэш контента сервис берёт
-  из S3 ETag. Дедуп по содержимому в пределах проекта.
-- `Replace(ctx, fileID, mimeType, content)` — заменить содержимое файла, сохранив его id.
-- `List(ctx, ListParams{Before, Limit})`, `Get(ctx, fileID)`, `Rename(ctx, fileID, name)`,
-  `Delete(ctx, fileID)` (soft-delete), `Usage(ctx)` — снимок хранимого объёма проекта.
+  из S3 ETag. Дедуп по содержимому в пределах неймспейса проекта.
+- `UploadToNamespace(ctx, namespace, fileName, mimeType, content)` — то же, но в
+  явный неймспейс: интеграция кладёт машинно-управляемые файлы (например, вложения
+  диалогов) в собственный слаг, чтобы они не попадали в медиатеку пользователя и не
+  могли быть оттуда удалены.
+- `Replace(ctx, fileID, mimeType, content)` — заменить содержимое файла, сохранив его id
+  (и его неймспейс).
+- `List(ctx, ListParams{Namespace, Before, Limit})` (пустой `Namespace` — все
+  неймспейсы), `Get(ctx, fileID)`, `Rename(ctx, fileID, name)`,
+  `Delete(ctx, fileID)` (soft-delete), `Usage(ctx)` — хранимый объём проекта
+  (итог + разбивка по неймспейсам).
+- `PurgeNamespace(ctx, namespace, lastUsedBefore)` — bulk-очистка своего неймспейса:
+  мягко удаляет файлы, не использовавшиеся с указанного момента (`nil` — все),
+  возвращает число удалённых. Так интеграция сама ограничивает рост своего хранилища.
 - `client.Files.WithAPIKey(projectKey)` — как и у CRM, дешёвая копия под другой
   project API key (мульти-проектный процесс).
 
