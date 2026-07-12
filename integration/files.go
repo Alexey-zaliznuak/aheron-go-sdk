@@ -40,9 +40,13 @@ func (c *FilesClient) WithAPIKey(apiKey string) *FilesClient {
 }
 
 // File is a stored media file. URL is the stable public GET URL to its bytes
-// (the media bucket grants public read).
+// (the media bucket grants public read). Namespace partitions a project's files
+// by owner/purpose: "library" is the user-facing media library; integrations
+// keep machine-managed files under their own namespace so users cannot delete
+// them from the library by accident.
 type File struct {
 	ID         string     `json:"id"`
+	Namespace  string     `json:"namespace"`
 	FileName   string     `json:"fileName"`
 	MimeType   string     `json:"mimeType"`
 	SizeBytes  int64      `json:"sizeBytes"`
@@ -52,10 +56,18 @@ type File struct {
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
 }
 
-// Usage is a project's storage usage snapshot.
-type Usage struct {
-	ProjectID   string `json:"projectId"`
+// NamespaceUsage is the stored volume of one namespace of the project.
+type NamespaceUsage struct {
+	Namespace   string `json:"namespace"`
 	StoredBytes int64  `json:"storedBytes"`
+}
+
+// Usage is a project's storage usage snapshot: the billable total plus a
+// per-namespace breakdown.
+type Usage struct {
+	ProjectID   string           `json:"projectId"`
+	StoredBytes int64            `json:"storedBytes"`
+	Namespaces  []NamespaceUsage `json:"namespaces"`
 }
 
 type filesListResponse struct {
@@ -72,6 +84,16 @@ type finalizeUploadBody struct {
 	UploadKey string `json:"uploadKey"`
 	FileName  string `json:"fileName"`
 	MimeType  string `json:"mimeType"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
+type purgeNamespaceBody struct {
+	Namespace      string     `json:"namespace"`
+	LastUsedBefore *time.Time `json:"lastUsedBefore,omitempty"`
+}
+
+type purgeNamespaceResponse struct {
+	Deleted int `json:"deleted"`
 }
 
 type replaceContentBody struct {
@@ -79,14 +101,23 @@ type replaceContentBody struct {
 	MimeType  string `json:"mimeType"`
 }
 
-// Upload stores content as a new file (deduplicated by content within the
-// project) and returns its metadata. The bytes are PUT directly to object
-// storage via a presigned URL — they do not transit media-service — then the
-// upload is finalized. The content hash is derived server-side from the object's
-// ETag, so no hash is sent; the PUT carries a Content-MD5 so storage rejects a
-// corrupted transfer. mimeType may be empty; the service infers it from the
-// file name.
+// Upload stores content as a new file in the project's media library (the
+// "library" namespace, deduplicated by content) and returns its metadata. The
+// bytes are PUT directly to object storage via a presigned URL — they do not
+// transit media-service — then the upload is finalized. The content hash is
+// derived server-side from the object's ETag, so no hash is sent; the PUT
+// carries a Content-MD5 so storage rejects a corrupted transfer. mimeType may
+// be empty; the service infers it from the file name.
 func (c *FilesClient) Upload(ctx context.Context, fileName, mimeType string, content []byte) (File, error) {
+	return c.UploadToNamespace(ctx, "", fileName, mimeType, content)
+}
+
+// UploadToNamespace is Upload targeting an explicit namespace. Integrations
+// should store machine-managed files (e.g. dialog attachments) under their own
+// namespace slug so the files stay out of the user's media library and cannot
+// be deleted from it. Deduplication is namespace-scoped. An empty namespace
+// means the media library.
+func (c *FilesClient) UploadToNamespace(ctx context.Context, namespace, fileName, mimeType string, content []byte) (File, error) {
 	if len(content) == 0 {
 		return File{}, fmt.Errorf("integration: Upload requires content")
 	}
@@ -106,6 +137,7 @@ func (c *FilesClient) Upload(ctx context.Context, fileName, mimeType string, con
 		UploadKey: target.UploadKey,
 		FileName:  fileName,
 		MimeType:  mimeType,
+		Namespace: namespace,
 	})
 	if err != nil {
 		return File{}, fmt.Errorf("integration: marshal finalize: %w", err)
@@ -159,14 +191,19 @@ func (c *FilesClient) Replace(ctx context.Context, fileID, mimeType string, cont
 
 // ListParams filters and paginates a file listing. Before is a keyset cursor
 // (return files created strictly before it); Limit caps the page size.
+// Namespace filters to one namespace; empty lists every namespace.
 type ListParams struct {
-	Before *time.Time
-	Limit  int
+	Namespace string
+	Before    *time.Time
+	Limit     int
 }
 
 // List returns the project's live files, newest first.
 func (c *FilesClient) List(ctx context.Context, p ListParams) ([]File, error) {
 	query := map[string]string{}
+	if p.Namespace != "" {
+		query["namespace"] = p.Namespace
+	}
 	if p.Before != nil {
 		query["before"] = p.Before.UTC().Format(time.RFC3339)
 	}
@@ -235,6 +272,33 @@ func (c *FilesClient) Delete(ctx context.Context, fileID string) error {
 	}
 	_, err = c.http.Do(ctx, req)
 	return err
+}
+
+// PurgeNamespace bulk soft-deletes the project's files in one namespace,
+// optionally only those not used since lastUsedBefore (nil purges the whole
+// namespace). It is how an integration bounds the growth of its own namespace.
+// Returns the number of files deleted.
+func (c *FilesClient) PurgeNamespace(ctx context.Context, namespace string, lastUsedBefore *time.Time) (int, error) {
+	if namespace == "" {
+		return 0, fmt.Errorf("integration: PurgeNamespace requires namespace")
+	}
+	body, err := json.Marshal(purgeNamespaceBody{Namespace: namespace, LastUsedBefore: lastUsedBefore})
+	if err != nil {
+		return 0, fmt.Errorf("integration: marshal purge: %w", err)
+	}
+	req, err := c.bearerRequest(http.MethodPost, "/files/purge", nil, body, false)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.http.Do(ctx, req)
+	if err != nil {
+		return 0, err
+	}
+	var out purgeNamespaceResponse
+	if err := json.Unmarshal(resp.Body, &out); err != nil {
+		return 0, fmt.Errorf("integration: decode purge response: %w", err)
+	}
+	return out.Deleted, nil
 }
 
 // Usage returns the project's storage usage snapshot.
