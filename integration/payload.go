@@ -14,10 +14,17 @@ package integration
 // {{context}}. The integration passes it straight to StepsClient.Resolve to
 // advance the step; correlation is by (ID, Version). InputKey is the input port
 // the subject entered the block through (nil when the block has no inputs).
+//
+// SubjectID and ProjectID identify the subject (CRM lead) and project the step
+// runs for, letting the integration resolve its own per-subject state (e.g. map
+// the subject to an external messenger user it already stores). They are omitted
+// from the resolve call, which correlates only by (ID, Version).
 type ExecutionContext struct {
-	ID       string  `json:"id"`
-	Version  int64   `json:"version"`
-	InputKey *string `json:"inputKey,omitempty"`
+	ID        string  `json:"id"`
+	Version   int64   `json:"version"`
+	InputKey  *string `json:"inputKey,omitempty"`
+	SubjectID string  `json:"subjectId,omitempty"`
+	ProjectID string  `json:"projectId,omitempty"`
 }
 
 // InstallRequest is the fixed body the platform POSTs to the integration's
