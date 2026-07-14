@@ -240,9 +240,53 @@ type VariableDefinition struct {
 	Type         string          `json:"type"`
 	Description  *string         `json:"description,omitempty"`
 	DefaultValue json.RawMessage `json:"defaultValue,omitempty"`
-	// OwnerType is "project" or "integration".
-	OwnerType string    `json:"ownerType"`
-	CreatedAt time.Time `json:"createdAt"`
+	// OwnerType is "project" or "integration". IntegrationID is set only for
+	// integration-owned definitions.
+	OwnerType     string    `json:"ownerType"`
+	IntegrationID *string   `json:"integrationId,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+}
+
+// ListVariableDefinitionsParams narrows ListVariableDefinitions. The zero value
+// lists every definition of the project.
+type ListVariableDefinitionsParams struct {
+	// OwnerType filters by ownership: "project" or "integration". Empty lists both.
+	OwnerType string
+	// IntegrationID keeps only definitions owned by that integration.
+	IntegrationID string
+}
+
+// ListVariableDefinitions returns the project's subject variable definitions,
+// optionally filtered by owner. Integrations use it to offer the author a
+// picker of existing variables (e.g. "save the reply into variable X") instead
+// of a free-form key that may silently not exist.
+func (c *CRMClient) ListVariableDefinitions(ctx context.Context, projectID string, p ListVariableDefinitionsParams) ([]VariableDefinition, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("integration: ListVariableDefinitions requires projectID")
+	}
+	var query map[string]string
+	if p.OwnerType != "" || p.IntegrationID != "" {
+		query = make(map[string]string, 2)
+		if p.OwnerType != "" {
+			query["ownerType"] = p.OwnerType
+		}
+		if p.IntegrationID != "" {
+			query["integrationId"] = p.IntegrationID
+		}
+	}
+	req, err := c.bearerRequest(http.MethodGet, "/projects/"+projectID+"/variable-definitions", query, nil, true)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var out []VariableDefinition
+	if err := json.Unmarshal(resp.Body, &out); err != nil {
+		return nil, fmt.Errorf("integration: decode variable definitions: %w", err)
+	}
+	return out, nil
 }
 
 // CreateVariableDefinitionParams is the payload to create a subject variable

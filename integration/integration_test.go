@@ -189,3 +189,53 @@ func TestResolveRequiresSigner(t *testing.T) {
 		t.Fatal("expected error when no signer configured")
 	}
 }
+
+func TestListVariableDefinitions(t *testing.T) {
+	var gotPath, gotQuery, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{"id":"d1","projectId":"p1","name":"Ответ","key":"answer","type":"string","ownerType":"project","createdAt":"2026-01-01T00:00:00Z"},
+			{"id":"d2","projectId":"p1","name":"VK id","key":"vk_user_id","type":"string","ownerType":"integration","integrationId":"int-9","createdAt":"2026-01-01T00:00:00Z"}
+		]`))
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{IntegrationID: "int-1", APIKey: "key-1", CRMURL: srv.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	defs, err := c.CRM.ListVariableDefinitions(context.Background(), "p1", ListVariableDefinitionsParams{OwnerType: "project"})
+	if err != nil {
+		t.Fatalf("list variable definitions: %v", err)
+	}
+	if gotPath != "/projects/p1/variable-definitions" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotQuery != "ownerType=project" {
+		t.Fatalf("query = %q", gotQuery)
+	}
+	if gotAuth != "Bearer key-1" {
+		t.Fatalf("authorization = %q", gotAuth)
+	}
+	if len(defs) != 2 || defs[0].Key != "answer" || defs[1].OwnerType != "integration" {
+		t.Fatalf("defs = %+v", defs)
+	}
+	if defs[1].IntegrationID == nil || *defs[1].IntegrationID != "int-9" {
+		t.Fatalf("integrationId = %v", defs[1].IntegrationID)
+	}
+}
+
+func TestListVariableDefinitionsRequiresProject(t *testing.T) {
+	c, err := New(Config{IntegrationID: "int-1", APIKey: "key-1"})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if _, err := c.CRM.ListVariableDefinitions(context.Background(), "", ListVariableDefinitionsParams{}); err == nil {
+		t.Fatal("expected error for empty projectID")
+	}
+}
