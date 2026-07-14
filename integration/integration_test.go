@@ -219,6 +219,56 @@ func TestReactivateSendsModeAndStepID(t *testing.T) {
 	}
 }
 
+func TestListTriggersDecodesSettings(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	seed := base64.StdEncoding.EncodeToString(priv.Seed())
+
+	var gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"triggers":[{
+			"schemeId":"s1","stepId":"st1","blockKey":"trigger",
+			"settings":{"subtriggers":[{"id":"a1","kind":"starts_with","pattern":"привет"}]},
+			"activations":[{"activationKey":"trg-a1","outputKey":"trg-a1"}]
+		}]}`))
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{IntegrationID: "int-1", PrivateKey: seed, ExecutionURL: srv.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	instances, err := c.Triggers.List(context.Background(), "p1", "trigger")
+	if err != nil {
+		t.Fatalf("list triggers: %v", err)
+	}
+	if gotPath != "/integrations/triggers" {
+		t.Fatalf("path = %q, want /integrations/triggers", gotPath)
+	}
+	if gotQuery != "blockKey=trigger&projectId=p1" && gotQuery != "projectId=p1&blockKey=trigger" {
+		t.Fatalf("query = %q", gotQuery)
+	}
+	if len(instances) != 1 || instances[0].StepID != "st1" {
+		t.Fatalf("instances = %+v", instances)
+	}
+	var settings struct {
+		Subtriggers []struct {
+			ID      string `json:"id"`
+			Kind    string `json:"kind"`
+			Pattern string `json:"pattern"`
+		} `json:"subtriggers"`
+	}
+	if err := json.Unmarshal(instances[0].Settings, &settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if len(settings.Subtriggers) != 1 || settings.Subtriggers[0].Pattern != "привет" {
+		t.Fatalf("settings = %+v", settings)
+	}
+}
+
 func TestResolveRequiresSigner(t *testing.T) {
 	c, err := New(Config{IntegrationID: "int-1"}) // no private key
 	if err != nil {

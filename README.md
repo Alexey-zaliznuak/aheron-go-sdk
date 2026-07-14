@@ -136,6 +136,10 @@ func main() {
 - `client.Triggers.Activate(ctx, params)` — активация триггера по внутреннему
   `SubjectID` **или** по внешней идентичности (`IntegrationSubjectID` [+ `Type`]).
 - `client.Triggers.List(ctx, projectID, blockKey)` — список инстансов триггера.
+  Каждый `TriggerInstance` несёт `Settings` — сырой JSON настроек шага, как их
+  сохранил редактор блока. По нему интеграция может построить собственный реестр
+  правил (например, паттерны матчинга входящих сообщений) без отдельного канала
+  синхронизации.
 
 **Данные** (`client.CRM`, по project API key):
 

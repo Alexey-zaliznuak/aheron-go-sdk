@@ -108,11 +108,15 @@ type TriggerActivation struct {
 }
 
 // TriggerInstance is a single integration trigger step placed on a scheme, with
-// its declared activation keys and their outputs.
+// its declared activation keys and their outputs. Settings is the step's raw
+// settings document as saved by the block's settings editor, so an integration
+// can rebuild its own rule registry (e.g. message-matching patterns) from the
+// listing alone.
 type TriggerInstance struct {
 	SchemeID    string              `json:"schemeId"`
 	StepID      string              `json:"stepId"`
 	BlockKey    string              `json:"blockKey"`
+	Settings    json.RawMessage     `json:"settings,omitempty"`
 	Activations []TriggerActivation `json:"activations"`
 }
 
