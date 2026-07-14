@@ -145,10 +145,11 @@ func TestOutboundResolveIsSigned(t *testing.T) {
 	seed := base64.StdEncoding.EncodeToString(priv.Seed())
 
 	var gotBody []byte
-	var gotID string
+	var gotID, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotBody, _ = io.ReadAll(r.Body)
 		gotID = r.Header.Get(sign.HeaderIntegrationID)
+		gotPath = r.URL.Path
 		ts := r.Header.Get(sign.HeaderIntegrationTimestamp)
 		sig := r.Header.Get(sign.HeaderIntegrationSignature)
 		if err := sign.Verify(pub, ts, gotBody, sig); err != nil {
@@ -170,6 +171,10 @@ func TestOutboundResolveIsSigned(t *testing.T) {
 	}
 	if gotID != "int-1" {
 		t.Fatalf("integration id header mismatch: %q", gotID)
+	}
+	// ExecutionURL carries the gateway prefix, so the path is relative to it.
+	if gotPath != "/integrations/resolve" {
+		t.Fatalf("resolve path = %q, want /integrations/resolve", gotPath)
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal(gotBody, &decoded); err != nil {

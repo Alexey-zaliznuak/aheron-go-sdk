@@ -10,9 +10,11 @@ import (
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
 )
 
+// Paths are relative to the configured ExecutionURL, which already carries the
+// gateway's "/api/execution" prefix.
 const (
-	activatePath = "/api/integrations/triggers/activate"
-	triggersPath = "/api/integrations/triggers"
+	activatePath = "/integrations/triggers/activate"
+	triggersPath = "/integrations/triggers"
 )
 
 // TriggersClient activates integration triggers and lists trigger instances. All

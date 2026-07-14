@@ -10,7 +10,9 @@ import (
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
 )
 
-const resolvePath = "/api/integrations/resolve"
+// resolvePath is relative to the configured ExecutionURL, which already carries
+// the gateway's "/api/execution" prefix.
+const resolvePath = "/integrations/resolve"
 
 // StepsClient resolves parked integrationAction steps. All calls are signed with
 // the integration's private key.

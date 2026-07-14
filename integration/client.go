@@ -25,15 +25,17 @@ import (
 )
 
 // Default platform base URLs, used when the corresponding Config field is empty.
+// Each base already carries its gateway prefix (the platform routes every
+// service under its own "/api/<service>" namespace):
 //
-//   - ExecutionURL is the platform origin: the signed integration endpoints live
-//     under "{ExecutionURL}/api/integrations/...". (Resolve normally targets the
-//     absolute URL the platform supplies in the inbound payload, so this base is
-//     used mainly for trigger activation/listing.)
+//   - ExecutionURL carries the gateway's "/api/execution" prefix: the signed
+//     integration endpoints live at "{ExecutionURL}/integrations/..." (resolve,
+//     trigger activation/listing).
 //   - CRMURL carries the gateway's "/api/crm" prefix: CRM calls hit
 //     "{CRMURL}/projects/...", matching the platform's public CRM routes.
+//   - MediaURL carries the gateway's "/api/media" prefix.
 const (
-	DefaultExecutionURL = "https://aheron.pro"
+	DefaultExecutionURL = "https://aheron.pro/api/execution"
 	DefaultCRMURL       = "https://aheron.pro/api/crm"
 	DefaultMediaURL     = "https://aheron.pro/api/media"
 )
@@ -52,8 +54,10 @@ type Config struct {
 	// install time. It authenticates CRM data calls. Optional.
 	APIKey string
 
-	// ExecutionURL is the base URL of the execution-service public API (where the
-	// signed integration endpoints live). Defaults to DefaultExecutionURL.
+	// ExecutionURL is the base URL of the execution-service public API, already
+	// carrying the gateway's "/api/execution" prefix (the signed integration
+	// endpoints live at "{ExecutionURL}/integrations/..."). Defaults to
+	// DefaultExecutionURL.
 	ExecutionURL string
 	// CRMURL is the base URL of the crm-backend public API. Defaults to
 	// DefaultCRMURL.

@@ -110,7 +110,7 @@ func main() {
 | `IntegrationID`                                            | id интеграции (uuid), уходит в `X-Integration-Id`                    | —                            |
 | `PrivateKey`                                               | Ed25519 приватный ключ интеграции, base64 (seed 32б или полный 64б)  | —                            |
 | `APIKey`                                                   | project API key (`ahr_proj_...`) для CRM                             | —                            |
-| `ExecutionURL`                                             | origin платформы; эндпоинты интеграций под `/api/integrations/...`   | `https://aheron.pro`         |
+| `ExecutionURL`                                             | база execution-service с префиксом шлюза `/api/execution`; эндпоинты интеграций под `/integrations/...` | `https://aheron.pro/api/execution` |
 | `CRMURL`                                                   | база CRM с префиксом шлюза `/api/crm`; вызовы бьют в `/projects/...` | `https://aheron.pro/api/crm` |
 | `MediaURL`                                                 | база media-service с префиксом шлюза `/api/media` (файлы проекта)    | `https://aheron.pro/api/media` |
 | `Timeout` / `RetryCount` / `RetryWaitMin` / `RetryWaitMax` | транспорт                                                            | 30s / 2 / 0.5s / 5s          |
@@ -191,8 +191,10 @@ SDK не тянет конкретный логгер: передайте сво
 
 ## Замечания по деплою
 
-- `Resolve`, `Activate` и `List` используют `ExecutionURL` (origin платформы,
-  эндпоинты под `/api/integrations/...`).
+- `Resolve`, `Activate` и `List` используют `ExecutionURL` — базу с префиксом
+  шлюза `/api/execution` (эндпоинты под `{ExecutionURL}/integrations/...`). Если
+  ваш деплой отдаёт execution-service по другому адресу — задайте `ExecutionURL`
+  соответственно.
 - CRM ходит через префикс шлюза `/api/crm`. Если ваш деплой отдаёт CRM по
   другому адресу — задайте `CRMURL` соответственно.
 - Файлы (`client.Files`) ходят через префикс шлюза `/api/media`. Если media-service
