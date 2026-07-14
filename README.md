@@ -125,8 +125,14 @@ func main() {
 
 - `client.Steps.Resolve(ctx, execCtx, output, vars)` — резолв припаркованного
   `integrationAction`. `execCtx` (`integration.ExecutionContext`: `ID`, `Version`,
-  `InputKey`) берётся из тела action-запроса (плейсхолдер `{{context}}`); вызов
-  уходит на `ExecutionURL` + путь resolve.
+  `InputKey`, `StepID`) берётся из тела action-запроса (плейсхолдер `{{context}}`);
+  вызов уходит на `ExecutionURL` + путь resolve.
+- `client.Steps.Reactivate(ctx, execCtx, output, vars)` — повторная активация:
+  прогоняет субъекта через выход шага, даже если контекст давно ушёл дальше
+  («нажал старую кнопку ещё раз»). Корреляции по версии нет — платформа
+  проверяет только владение шагом (`execCtx.StepID` обязателен) и перезаписывает
+  позицию субъекта на ветке выхода, как активация триггера. Сохраняйте `StepID`
+  вместе с `ID`, если интеграция поддерживает поздние активации.
 - `client.Triggers.Activate(ctx, params)` — активация триггера по внутреннему
   `SubjectID` **или** по внешней идентичности (`IntegrationSubjectID` [+ `Type`]).
 - `client.Triggers.List(ctx, projectID, blockKey)` — список инстансов триггера.
@@ -191,7 +197,7 @@ SDK не тянет конкретный логгер: передайте сво
 
 ## Замечания по деплою
 
-- `Resolve`, `Activate` и `List` используют `ExecutionURL` — базу с префиксом
+- `Resolve`, `Reactivate`, `Activate` и `List` используют `ExecutionURL` — базу с префиксом
   шлюза `/api/execution` (эндпоинты под `{ExecutionURL}/integrations/...`). Если
   ваш деплой отдаёт execution-service по другому адресу — задайте `ExecutionURL`
   соответственно.

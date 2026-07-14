@@ -27,6 +27,8 @@ type resolveBody struct {
 	ContextVersion     int64          `json:"contextVersion"`
 	Output             string         `json:"output"`
 	Variables          map[string]any `json:"variables,omitempty"`
+	Mode               string         `json:"mode,omitempty"`
+	StepID             string         `json:"stepId,omitempty"`
 }
 
 // Resolve advances a parked integrationAction context through the chosen output.
@@ -56,6 +58,48 @@ func (c *StepsClient) Resolve(ctx context.Context, ec ExecutionContext, output s
 	})
 	if err != nil {
 		return fmt.Errorf("integration: marshal resolve: %w", err)
+	}
+
+	req, err := buildSignedRequest(c.signer, c.id, http.MethodPost, resolvePath, nil, body, true)
+	if err != nil {
+		return err
+	}
+	_, err = c.http.Do(ctx, req)
+	return err
+}
+
+// Reactivate re-routes the subject through the step's chosen output even after
+// the context has moved on — "the user pressed an old button again" semantics.
+// Unlike Resolve there is no correlation: the platform ignores the context's
+// current status/version, checks only that the integration owns ec.StepID, and
+// overwrites the subject's position on the output edge's branch (like a trigger
+// activation). Pass the ExecutionContext the platform sent when the step
+// originally ran; ID, StepID and output are required. variables optionally
+// persists values, as in Resolve.
+//
+// The platform returns 202 and applies the re-route asynchronously. An output
+// with no wired edge is a no-op on the platform side.
+func (c *StepsClient) Reactivate(ctx context.Context, ec ExecutionContext, output string, variables map[string]any) error {
+	if ec.ID == "" {
+		return fmt.Errorf("integration: Reactivate requires ExecutionContext.ID")
+	}
+	if ec.StepID == "" {
+		return fmt.Errorf("integration: Reactivate requires ExecutionContext.StepID")
+	}
+	if output == "" {
+		return fmt.Errorf("integration: Reactivate requires output")
+	}
+
+	body, err := json.Marshal(resolveBody{
+		ExecutionContextID: ec.ID,
+		ContextVersion:     ec.Version,
+		Output:             output,
+		Variables:          variables,
+		Mode:               "reactivate",
+		StepID:             ec.StepID,
+	})
+	if err != nil {
+		return fmt.Errorf("integration: marshal reactivate: %w", err)
 	}
 
 	req, err := buildSignedRequest(c.signer, c.id, http.MethodPost, resolvePath, nil, body, true)

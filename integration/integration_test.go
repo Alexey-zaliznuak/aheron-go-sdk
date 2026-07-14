@@ -185,6 +185,40 @@ func TestOutboundResolveIsSigned(t *testing.T) {
 	}
 }
 
+func TestReactivateSendsModeAndStepID(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	seed := base64.StdEncoding.EncodeToString(priv.Seed())
+
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{IntegrationID: "int-1", PrivateKey: seed, ExecutionURL: srv.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	ec := ExecutionContext{ID: "ctx-9", Version: 3, StepID: "step-7"}
+	if err := c.Steps.Reactivate(context.Background(), ec, "btn-1", nil); err != nil {
+		t.Fatalf("reactivate: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(gotBody, &decoded); err != nil {
+		t.Fatalf("decode captured body: %v", err)
+	}
+	if decoded["mode"] != "reactivate" || decoded["stepId"] != "step-7" || decoded["output"] != "btn-1" {
+		t.Fatalf("reactivate body mismatch: %v", decoded)
+	}
+
+	// StepID is mandatory for reactivation.
+	if err := c.Steps.Reactivate(context.Background(), ExecutionContext{ID: "ctx-9"}, "btn-1", nil); err == nil {
+		t.Fatal("expected error without StepID")
+	}
+}
+
 func TestResolveRequiresSigner(t *testing.T) {
 	c, err := New(Config{IntegrationID: "int-1"}) // no private key
 	if err != nil {

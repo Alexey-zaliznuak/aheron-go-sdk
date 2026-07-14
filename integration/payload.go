@@ -19,12 +19,18 @@ package integration
 // runs for, letting the integration resolve its own per-subject state (e.g. map
 // the subject to an external messenger user it already stores). They are omitted
 // from the resolve call, which correlates only by (ID, Version).
+//
+// StepID is the scheme step the context was parked on. It is not needed for a
+// regular Resolve, but StepsClient.Reactivate requires it to re-enter this
+// step's output after the context has moved on, so persist it alongside ID if
+// the integration supports late re-activation.
 type ExecutionContext struct {
 	ID        string  `json:"id"`
 	Version   int64   `json:"version"`
 	InputKey  *string `json:"inputKey,omitempty"`
 	SubjectID string  `json:"subjectId,omitempty"`
 	ProjectID string  `json:"projectId,omitempty"`
+	StepID    string  `json:"stepId,omitempty"`
 }
 
 // InstallRequest is the fixed body the platform POSTs to the integration's
