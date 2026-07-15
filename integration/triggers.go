@@ -120,34 +120,63 @@ type TriggerInstance struct {
 	Activations []TriggerActivation `json:"activations"`
 }
 
-type listTriggersResponse struct {
-	Triggers []TriggerInstance `json:"triggers"`
+// TriggerListing is the versioned result of ListTriggers: the trigger instances
+// of a block type in a project plus the ConfigVersion they were listed at.
+//
+// ConfigVersion is the per-(project, integration) counter the platform bumps on
+// every trigger-configuration change (the same value carried by
+// TriggerSyncRequest). Use it to guard the local rule snapshot: only replace the
+// snapshot when a freshly listed ConfigVersion is greater than the one already
+// applied, so out-of-order syncs and TTL-based refreshes converge on the same
+// state. It is 0 when the platform is too old to report a version.
+type TriggerListing struct {
+	ConfigVersion int64             `json:"configVersion"`
+	Triggers      []TriggerInstance `json:"triggers"`
 }
 
 // List returns the trigger instances of a block type in a project, scoped to
-// this integration. It is a signed GET (the signature covers an empty body).
+// this integration. It is a signed GET (the signature covers an empty body). It
+// delegates to ListTriggers and drops the version; use ListTriggers when you
+// need the ConfigVersion to guard a local snapshot.
 func (c *TriggersClient) List(ctx context.Context, projectID, blockKey string) ([]TriggerInstance, error) {
+	listing, err := c.ListTriggers(ctx, projectID, blockKey)
+	if err != nil {
+		return nil, err
+	}
+	return listing.Triggers, nil
+}
+
+// ListTriggers returns the trigger instances of a block type in a project,
+// scoped to this integration, together with the ConfigVersion they were listed
+// at. It is a signed GET (the signature covers an empty body) to the same
+// endpoint as List.
+//
+// Pair it with HandleTriggerSync: when a sync ping's ConfigVersion is newer than
+// the stored one, call ListTriggers and atomically replace the local rule
+// snapshot guarded by the returned ConfigVersion. Because the listing itself
+// carries the version, a TTL-based fallback resync uses the very same guard.
+func (c *TriggersClient) ListTriggers(ctx context.Context, projectID, blockKey string) (TriggerListing, error) {
 	if projectID == "" {
-		return nil, fmt.Errorf("integration: List requires projectID")
+		return TriggerListing{}, fmt.Errorf("integration: ListTriggers requires projectID")
 	}
 	if blockKey == "" {
-		return nil, fmt.Errorf("integration: List requires blockKey")
+		return TriggerListing{}, fmt.Errorf("integration: ListTriggers requires blockKey")
 	}
 
 	query := map[string]string{"projectId": projectID, "blockKey": blockKey}
 	req, err := buildSignedRequest(c.signer, c.id, http.MethodGet, triggersPath, query, nil, true)
 	if err != nil {
-		return nil, err
+		return TriggerListing{}, err
 	}
 	resp, err := c.http.Do(ctx, req)
 	if err != nil {
-		return nil, err
+		return TriggerListing{}, err
 	}
-	var out listTriggersResponse
+	var out TriggerListing
 	if len(resp.Body) > 0 {
 		if err := json.Unmarshal(resp.Body, &out); err != nil {
-			return nil, fmt.Errorf("integration: decode triggers response: %w", err)
+			return TriggerListing{}, fmt.Errorf("integration: decode triggers response: %w", err)
 		}
 	}
-	return out.Triggers, nil
+	return out, nil
 }

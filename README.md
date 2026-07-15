@@ -140,6 +140,12 @@ func main() {
   сохранил редактор блока. По нему интеграция может построить собственный реестр
   правил (например, паттерны матчинга входящих сообщений) без отдельного канала
   синхронизации.
+- `client.Triggers.ListTriggers(ctx, projectID, blockKey)` — то же, но
+  возвращает `TriggerListing{ConfigVersion, Triggers}`: помимо инстансов отдаёт
+  `configVersion` — счётчик конфигурации триггеров для пары (проект, интеграция),
+  которым нужно защищать локальный снапшот правил (см. ниже про `trigger_sync`).
+  `List` — обёртка над `ListTriggers`, отбрасывающая версию (`0`, если платформа
+  старая и версию не присылает).
 
 **Данные** (`client.CRM`, по project API key):
 
@@ -191,7 +197,86 @@ func main() {
   тело читается через `integration.DecodeBody(r, &dst)`.
 - `verifier.HandleInstall(fn)` — хендлер `install_url`: проверка + декод фиксированного
   `InstallRequest{ProjectID, ProjectAPIKey}` + вызов `fn`.
+- `verifier.HandleUninstall(fn)` — хендлер `uninstall_url`: проверка + декод
+  `UninstallRequest{ProjectID}` + вызов `fn` (удалите сохранённый project API key).
+- `verifier.HandleTriggerSync(fn)` — хендлер `trigger_sync_url`: проверка + декод
+  `TriggerSyncRequest{ProjectID, BlockKey, ConfigVersion}` + вызов `fn`
+  (пересинхронизируйте локальные правила по версии).
 - `integration.DecodeBody(r, &dst)` / `integration.VerifiedBody(r)` — доступ к проверенному телу.
+
+`JWKSURL` в `VerifierConfig` можно не задавать — пустое значение подставит
+`DefaultJWKSURL` (`https://aheron.pro/.well-known/aheron-integration-jwks.json`).
+Задавайте его только для нестандартного деплоя платформы.
+
+### Uninstall
+
+Платформа шлёт `POST` на `uninstall_url` при удалении интеграции из проекта.
+Тело фиксированное — `UninstallRequest{ProjectID}`. Сбросьте всё состояние по
+проекту, в первую очередь сохранённый на install project API key, чтобы больше
+не действовать от имени проекта. Ошибка `fn` → 500, платформа повторит доставку.
+
+```go
+http.Handle("/uninstall", verifier.HandleUninstall(
+	func(ctx context.Context, req integration.UninstallRequest) error {
+		return forgetProject(req.ProjectID) // удалить project API key и локальные данные
+	},
+))
+```
+
+### Trigger sync
+
+После изменения конфигурации триггер-блоков проекта платформа шлёт `POST` на
+`trigger_sync_url`. Это **пинг**, а не сами данные: тело —
+`TriggerSyncRequest{ProjectID, BlockKey, ConfigVersion}`. `ConfigVersion` —
+счётчик для пары (проект, интеграция), инкрементируемый транзакционно вместе с
+изменением. Сравните его с локально сохранённой версией: если пришедшая новее —
+подтяните актуальный список через `Triggers.ListTriggers` и атомарно замените
+снапшот правил, защитив его той же версией. Так дубли и доставки не по порядку
+не откатят конфигурацию назад. `ListTriggers` тоже возвращает `configVersion`,
+поэтому TTL-ресинки по таймеру используют ровно тот же guard.
+
+```go
+http.Handle("/triggers/sync", verifier.HandleTriggerSync(
+	func(ctx context.Context, req integration.TriggerSyncRequest) error {
+		if req.ConfigVersion <= localVersion(req.ProjectID, req.BlockKey) {
+			return nil // устаревший или повторный пинг — игнорируем
+		}
+		listing, err := client.Triggers.ListTriggers(ctx, req.ProjectID, req.BlockKey)
+		if err != nil {
+			return err // 500 → платформа повторит
+		}
+		// Атомарно заменить снапшот, только если версия действительно новее.
+		applyRules(req.ProjectID, req.BlockKey, listing.ConfigVersion, listing.Triggers)
+		return nil
+	},
+))
+```
+
+### Console view-token
+
+Iframe консоли (`integrations.console_url`) открывается внутри проекта и не
+получает auth-токены платформы. Вместо этого платформа передаёт ему короткоживущий
+подписанный view-token (через `postMessage`), а iframe шлёт его на бэкенд
+интеграции. `ConsoleVerifier` проверяет EdDSA-подпись токена по тому же JWKS
+платформы (переиспользует общий загрузчик ключей) и claims (`iss`/`aud`/`purpose`/
+`exp`/`nbf`), после чего можно доверять `ProjectID`. Любая ошибка оборачивает
+`ErrConsoleTokenInvalid` — отвечайте `401`, не раскрывая причину.
+
+```go
+consoleV, _ := integration.NewConsoleVerifier(integration.ConsoleVerifierConfig{
+	IntegrationID: os.Getenv("INTEGRATION_ID"), // обязателен; JWKSURL пуст → DefaultJWKSURL
+})
+
+http.HandleFunc("/console/data", func(w http.ResponseWriter, r *http.Request) {
+	claims, err := consoleV.Verify(r.Context(), r.Header.Get("Authorization"))
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	// claims.ProjectID теперь доверенный — отдать данные консоли по проекту.
+	_ = claims
+})
+```
 
 ## Логирование
 

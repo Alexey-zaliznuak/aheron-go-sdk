@@ -16,9 +16,9 @@ import (
 // verification, so a hostile caller cannot exhaust memory.
 const defaultMaxInboundBody = 1 << 20 // 1 MiB
 
-// VerifierConfig configures a Verifier. JWKSURL is required and must point at the
-// platform's well-known integration JWKS (for aheron.pro that is
-// https://aheron.pro/.well-known/aheron-integration-jwks.json).
+// VerifierConfig configures a Verifier. JWKSURL points at the platform's
+// well-known integration JWKS; an empty value falls back to DefaultJWKSURL
+// (aheron.pro). Set it only for a non-default platform deployment.
 type VerifierConfig struct {
 	JWKSURL string
 	// HTTPClient fetches the JWKS. Defaults to http.DefaultClient.
@@ -43,10 +43,11 @@ type Verifier struct {
 	log     Logger
 }
 
-// NewVerifier builds a Verifier. It returns an error when JWKSURL is empty.
+// NewVerifier builds a Verifier. An empty JWKSURL falls back to DefaultJWKSURL,
+// so the minimal setup needs no configuration at all on aheron.pro.
 func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 	if cfg.JWKSURL == "" {
-		return nil, fmt.Errorf("integration: VerifierConfig.JWKSURL is required")
+		cfg.JWKSURL = DefaultJWKSURL
 	}
 	window := cfg.Window
 	if window <= 0 {
@@ -129,6 +130,12 @@ type Handler func(ctx context.Context, r *http.Request) error
 // InstallHandler handles a verified, decoded install request.
 type InstallHandler func(ctx context.Context, req InstallRequest) error
 
+// UninstallHandler handles a verified, decoded uninstall request.
+type UninstallHandler func(ctx context.Context, req UninstallRequest) error
+
+// TriggerSyncHandler handles a verified, decoded trigger-sync request.
+type TriggerSyncHandler func(ctx context.Context, req TriggerSyncRequest) error
+
 // Handle wraps fn with signature verification. The action request body is
 // author-designed (see action_request_template), so fn reads it with DecodeBody
 // into its own struct. Use it for a version's action_url endpoint.
@@ -155,6 +162,44 @@ func (v *Verifier) HandleInstall(fn InstallHandler) http.Handler {
 		}
 		if err := fn(r.Context(), req); err != nil {
 			v.log.Error("integration install handler failed", LogF("error", err.Error()))
+			writeJSONError(w, http.StatusInternalServerError, "handler failed")
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+}
+
+// HandleUninstall verifies the request, decodes the fixed uninstall body and
+// calls fn. Use it for the integration's uninstall_url endpoint. A nil error
+// yields 200; a non-nil error yields 500 so the platform redelivers.
+func (v *Verifier) HandleUninstall(fn UninstallHandler) http.Handler {
+	return v.Verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req UninstallRequest
+		if err := DecodeBody(r, &req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := fn(r.Context(), req); err != nil {
+			v.log.Error("integration uninstall handler failed", LogF("error", err.Error()))
+			writeJSONError(w, http.StatusInternalServerError, "handler failed")
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+}
+
+// HandleTriggerSync verifies the request, decodes the fixed trigger-sync body
+// and calls fn. Use it for the integration's trigger_sync_url endpoint. A nil
+// error yields 200; a non-nil error yields 500 so the platform redelivers.
+func (v *Verifier) HandleTriggerSync(fn TriggerSyncHandler) http.Handler {
+	return v.Verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req TriggerSyncRequest
+		if err := DecodeBody(r, &req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := fn(r.Context(), req); err != nil {
+			v.log.Error("integration trigger-sync handler failed", LogF("error", err.Error()))
 			writeJSONError(w, http.StatusInternalServerError, "handler failed")
 			return
 		}

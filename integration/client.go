@@ -40,6 +40,12 @@ const (
 	DefaultMediaURL     = "https://aheron.pro/api/media"
 )
 
+// DefaultJWKSURL is the platform's well-known integration JWKS endpoint on
+// aheron.pro. It is the fallback used when VerifierConfig.JWKSURL or
+// ConsoleVerifierConfig.JWKSURL is empty. Both the inbound request signature
+// keys and the console view-token signing keys are published here.
+const DefaultJWKSURL = "https://aheron.pro/.well-known/aheron-integration-jwks.json"
+
 // Config configures a Client. IntegrationID and PrivateKey are required for the
 // signed platform endpoints (Steps, Triggers); APIKey is required only for the
 // CRM client. Zero-valued optional fields fall back to sensible defaults.

@@ -41,3 +41,27 @@ type InstallRequest struct {
 	ProjectID     string `json:"projectId"`
 	ProjectAPIKey string `json:"projectApiKey"`
 }
+
+// UninstallRequest is the fixed body the platform POSTs to the integration's
+// uninstall_url when the integration is removed from a project. The integration
+// should drop its per-project state — most importantly the project API key it
+// stored on install — so it no longer acts on the project's behalf.
+type UninstallRequest struct {
+	ProjectID string `json:"projectId"`
+}
+
+// TriggerSyncRequest is the fixed body the platform POSTs to the integration's
+// trigger_sync_url after a project's trigger-block configuration changed. It is a
+// ping, not the configuration itself: on receipt the integration re-reads the
+// current listing with TriggersClient.ListTriggers.
+//
+// ConfigVersion is a per-(project, integration) counter the platform increments
+// transactionally with each configuration change. It lets the integration ignore
+// out-of-order or duplicate deliveries: apply a freshly fetched snapshot only
+// when its version is greater than the last one already applied, and guard the
+// local snapshot by that version.
+type TriggerSyncRequest struct {
+	ProjectID     string `json:"projectId"`
+	BlockKey      string `json:"blockKey"`
+	ConfigVersion int64  `json:"configVersion"`
+}
