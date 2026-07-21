@@ -51,7 +51,7 @@ func TestInboundVerifyAndDecodeAction(t *testing.T) {
 	}
 
 	// An author-designed action body (matches the echo example's template).
-	body := []byte(`{"context":{"id":"ctx-1","version":7,"inputKey":"in"},` +
+	body := []byte(`{"context":{"id":"ctx-1","version":7,"inputKey":"in","schemeId":"scheme-1"},` +
 		`"actionKey":"open_course","settings":{"outputs":["ok","fail"]},` +
 		`"vars":{"project":{},"subject":{"name":"a"}},"integrationContext":{}}`)
 
@@ -78,6 +78,9 @@ func TestInboundVerifyAndDecodeAction(t *testing.T) {
 	}
 	if captured.Context.ID != "ctx-1" || captured.Context.Version != 7 {
 		t.Fatalf("decoded context mismatch: %+v", captured.Context)
+	}
+	if captured.Context.SchemeID != "scheme-1" {
+		t.Fatalf("decoded schemeId mismatch: %q", captured.Context.SchemeID)
 	}
 	if captured.ActionKey != "open_course" {
 		t.Fatalf("actionKey mismatch: %q", captured.ActionKey)
