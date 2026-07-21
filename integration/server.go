@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
@@ -15,6 +16,11 @@ import (
 // defaultMaxInboundBody caps how much of an inbound request body is read before
 // verification, so a hostile caller cannot exhaust memory.
 const defaultMaxInboundBody = 1 << 20 // 1 MiB
+
+const (
+	maxVariableValuesItems   = 200
+	maxVariableResolveValues = 100
+)
 
 // VerifierConfig configures a Verifier. JWKSURL points at the platform's
 // well-known integration JWKS; an empty value falls back to DefaultJWKSURL
@@ -136,6 +142,10 @@ type UninstallHandler func(ctx context.Context, req UninstallRequest) error
 // TriggerSyncHandler handles a verified, decoded trigger-sync request.
 type TriggerSyncHandler func(ctx context.Context, req TriggerSyncRequest) error
 
+// VariableValuesHandler handles a verified variable-values request and returns
+// the values the platform should display.
+type VariableValuesHandler func(ctx context.Context, req VariableValuesRequest) (VariableValuesResponse, error)
+
 // Handle wraps fn with signature verification. The action request body is
 // author-designed (see action_request_template), so fn reads it with DecodeBody
 // into its own struct. Use it for a version's action_url endpoint.
@@ -207,6 +217,89 @@ func (v *Verifier) HandleTriggerSync(fn TriggerSyncHandler) http.Handler {
 	}))
 }
 
+// HandleVariableValues verifies and decodes the platform's fixed
+// variable-values request, validates both sides of the callback contract and
+// writes its response as JSON.
+func (v *Verifier) HandleVariableValues(fn VariableValuesHandler) http.Handler {
+	return v.Verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req VariableValuesRequest
+		if err := DecodeBody(r, &req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := validateVariableValuesRequest(req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		response, err := fn(r.Context(), req)
+		if err != nil {
+			v.log.Error("integration variable-values handler failed", LogF("error", err.Error()))
+			writeJSONError(w, http.StatusInternalServerError, "handler failed")
+			return
+		}
+		if err := validateVariableValuesResponse(req, response); err != nil {
+			v.log.Error("integration variable-values handler returned invalid response", LogF("error", err.Error()))
+			writeJSONError(w, http.StatusInternalServerError, "handler returned invalid response")
+			return
+		}
+		if response.Items == nil {
+			response.Items = []VariableValueItem{}
+		}
+		writeJSON(w, http.StatusOK, response)
+	}))
+}
+
+func validateVariableValuesRequest(req VariableValuesRequest) error {
+	if strings.TrimSpace(req.ProjectID) == "" {
+		return fmt.Errorf("integration: projectId is required")
+	}
+	if strings.TrimSpace(req.VariableKey) == "" {
+		return fmt.Errorf("integration: variableKey is required")
+	}
+	if req.Limit != nil && (*req.Limit < 1 || *req.Limit > maxVariableValuesItems) {
+		return fmt.Errorf("integration: limit must be between 1 and %d", maxVariableValuesItems)
+	}
+	if req.Cursor != nil && strings.TrimSpace(*req.Cursor) == "" {
+		return fmt.Errorf("integration: cursor must not be empty")
+	}
+	if len(req.Values) > maxVariableResolveValues {
+		return fmt.Errorf("integration: values must contain at most %d items", maxVariableResolveValues)
+	}
+	if req.Values != nil && (req.Query != nil || req.Cursor != nil || req.Limit != nil) {
+		return fmt.Errorf("integration: search fields and values cannot be used together")
+	}
+	return nil
+}
+
+func validateVariableValuesResponse(req VariableValuesRequest, response VariableValuesResponse) error {
+	maxItems := maxVariableValuesItems
+	if req.Limit != nil {
+		maxItems = *req.Limit
+	}
+	if req.Values != nil {
+		maxItems = len(req.Values)
+		if response.NextCursor != nil {
+			return fmt.Errorf("integration: nextCursor is not allowed when resolving values")
+		}
+	}
+	if len(response.Items) > maxItems {
+		return fmt.Errorf("integration: response contains %d items, maximum is %d", len(response.Items), maxItems)
+	}
+	for i, item := range response.Items {
+		if strings.TrimSpace(item.Value) == "" {
+			return fmt.Errorf("integration: response item %d has an empty value", i)
+		}
+		if strings.TrimSpace(item.Title) == "" {
+			return fmt.Errorf("integration: response item %d has an empty title", i)
+		}
+	}
+	if response.NextCursor != nil && strings.TrimSpace(*response.NextCursor) == "" {
+		return fmt.Errorf("integration: nextCursor must not be empty")
+	}
+	return nil
+}
+
 func (v *Verifier) reject(w http.ResponseWriter, stage string, err error) {
 	if err != nil {
 		v.log.Warn("integration inbound rejected", LogF("stage", stage), LogF("error", err.Error()))
@@ -243,7 +336,11 @@ func VerifiedBody(r *http.Request) (body []byte, keyID string, ok bool) {
 }
 
 func writeJSONError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+	_ = json.NewEncoder(w).Encode(value)
 }

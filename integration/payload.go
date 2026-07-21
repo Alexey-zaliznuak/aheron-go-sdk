@@ -65,3 +65,30 @@ type TriggerSyncRequest struct {
 	BlockKey      string `json:"blockKey"`
 	ConfigVersion int64  `json:"configVersion"`
 }
+
+// VariableValuesRequest is the fixed body the platform POSTs to an
+// integration-provided variable-values endpoint. Query, Cursor and Limit select
+// search mode. Values selects resolve mode, in which the integration returns
+// labels for the supplied stored values.
+type VariableValuesRequest struct {
+	ProjectID   string   `json:"projectId"`
+	VariableKey string   `json:"variableKey"`
+	Query       *string  `json:"query,omitempty"`
+	Cursor      *string  `json:"cursor,omitempty"`
+	Limit       *int     `json:"limit,omitempty"`
+	Values      []string `json:"values,omitempty"`
+}
+
+// VariableValueItem is one selectable value returned by an integration.
+type VariableValueItem struct {
+	Value string  `json:"value"`
+	Title string  `json:"title"`
+	Icon  *string `json:"icon,omitempty"`
+}
+
+// VariableValuesResponse is the response from a variable-values endpoint.
+// NextCursor is used only for search pagination.
+type VariableValuesResponse struct {
+	Items      []VariableValueItem `json:"items"`
+	NextCursor *string             `json:"nextCursor,omitempty"`
+}
