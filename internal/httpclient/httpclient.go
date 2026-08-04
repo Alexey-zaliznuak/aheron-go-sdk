@@ -203,10 +203,12 @@ func extractMessage(body []byte) string {
 	if len(body) == 0 {
 		return ""
 	}
+
 	var envelope struct {
 		Error   string `json:"error"`
 		Message string `json:"message"`
 	}
+
 	if err := json.Unmarshal(body, &envelope); err == nil {
 		if envelope.Error != "" {
 			return envelope.Error
@@ -215,5 +217,6 @@ func extractMessage(body []byte) string {
 			return envelope.Message
 		}
 	}
+
 	return strings.TrimSpace(string(body))
 }
