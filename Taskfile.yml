@@ -228,7 +228,10 @@ tasks:
           echo "the root module has no release yet; run 'task release:minor' first" >&2
           exit 1
         fi
-        required=$(GOWORK=off go list -m -modfile={{.YDB_DIR}}/go.mod -f '{{.Version}}' "$MODULE")
+        # `go list -f '{{.Version}}'` cannot be written here: Task would
+        # interpolate `.Version` itself. Strip the module path instead.
+        required=$(GOWORK=off go list -m -modfile={{.YDB_DIR}}/go.mod "$MODULE")
+        required=${required##* }
         if [ "$required" != "$root_latest" ]; then
           echo "{{.YDB_DIR}}/go.mod requires $MODULE $required but the latest release is $root_latest." >&2
           echo "Release the root module first, then run:" >&2
