@@ -1,0 +1,9 @@
+// This file is committed on purpose. The ydb module depends on the root module
+// for the outbox contract, so without a workspace neither can be built from a
+// fresh clone until the root module is published.
+go 1.25.0
+
+use (
+	.
+	./ydb
+)
