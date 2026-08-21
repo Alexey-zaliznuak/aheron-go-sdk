@@ -228,7 +228,7 @@ tasks:
           echo "the root module has no release yet; run 'task release:minor' first" >&2
           exit 1
         fi
-        required=$(awk -v m="$MODULE" '$1 == m { print $2 }' {{.YDB_DIR}}/go.mod)
+        required=$(GOWORK=off go list -m -modfile={{.YDB_DIR}}/go.mod -f '{{.Version}}' "$MODULE")
         if [ "$required" != "$root_latest" ]; then
           echo "{{.YDB_DIR}}/go.mod requires $MODULE $required but the latest release is $root_latest." >&2
           echo "Release the root module first, then run:" >&2
