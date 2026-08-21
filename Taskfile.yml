@@ -3,8 +3,24 @@ version: '3'
 vars:
   REMOTE: origin
   MAIN_BRANCH: main
+  # GOWORK=off matters: inside the workspace `go list -m` prints every module in
+  # it, and MODULE has to name the root one alone.
   MODULE:
-    sh: go list -m
+    sh: GOWORK=off go list -m
+
+  # The repository holds two modules: the root one, which every integration
+  # uses, and ./ydb, which is separate so that ydb-go-sdk and its gRPC
+  # dependency tree stay out of the go.sum of integrations running on
+  # PostgreSQL. Its tags are prefixed, as Go requires for a nested module.
+  YDB_DIR: ydb
+  YDB_TAG_PREFIX: ydb/
+
+  # google.golang.org/genproto split googleapis/api and googleapis/rpc into
+  # their own modules. ydb-go-yc still drags in a pre-split version, and in
+  # workspace mode both copies end up in the build list, which makes every
+  # import of those packages ambiguous. `go mod tidy` drops the pin because
+  # nothing imports it directly, so tidy restores it right after.
+  YDB_GENPROTO_PIN: google.golang.org/genproto@v0.0.0-20260819154853-08b0e4226688
 
 tasks:
   default:
@@ -19,19 +35,33 @@ tasks:
       - gofmt -w .
 
   tidy:
-    desc: Tidy Go module dependencies
+    desc: Tidy Go module dependencies of both modules
     cmds:
       - go mod tidy
+      # `go mod tidy` ignores go.work by design, so from inside ./ydb the parent
+      # resolves to its last published tag — which does not yet contain whatever
+      # is being added here. A replace supplies it for the length of the command
+      # and is dropped straight after: a committed replace is forbidden.
+      - |
+        set -u
+        cd {{.YDB_DIR}}
+        go mod edit -replace={{.MODULE}}=..
+        go mod tidy; status=$?
+        go mod edit -dropreplace={{.MODULE}}
+        go mod edit -require={{.YDB_GENPROTO_PIN}}
+        exit $status
 
   vet:
-    desc: Run go vet
+    desc: Run go vet over both modules
     cmds:
       - go vet ./...
+      - go vet ./{{.YDB_DIR}}/...
 
   test:
-    desc: Run tests
+    desc: Run tests of both modules
     cmds:
       - go test ./...
+      - go test ./{{.YDB_DIR}}/...
 
   check:
     desc: Run all local checks (fmt, tidy, vet, test)
@@ -159,3 +189,77 @@ tasks:
     cmds:
       - task: release
         vars: { BUMP: major }
+
+  release:ydb:
+    desc: 'Tag and push the nested ydb module. Usage: task release:ydb [BUMP=patch|minor|major] or VERSION=v1.2.3'
+    deps: [vet, test]
+    vars:
+      BUMP: '{{.BUMP | default "patch"}}'
+      VERSION: '{{.VERSION | default ""}}'
+    cmds:
+      - |
+        set -eu
+
+        REMOTE="{{.REMOTE}}"
+        MAIN_BRANCH="{{.MAIN_BRANCH}}"
+        MODULE="{{.MODULE}}"
+        PREFIX="{{.YDB_TAG_PREFIX}}"
+        BUMP="{{.BUMP}}"
+        FORCED="{{.VERSION}}"
+
+        # --- guards: only release a clean, up-to-date main ---
+        branch=$(git rev-parse --abbrev-ref HEAD)
+        if [ "$branch" != "$MAIN_BRANCH" ]; then
+          echo "release must run on '$MAIN_BRANCH' (current: '$branch')" >&2
+          exit 1
+        fi
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "working tree is dirty; commit or stash your changes first" >&2
+          exit 1
+        fi
+        git fetch "$REMOTE" --tags --quiet
+
+        # --- the ydb module must point at a published root version ---
+        # Consumers of the ydb module resolve the root module through this
+        # require, not through go.work, so a stale value ships a module that
+        # cannot be built.
+        root_latest=$(git describe --tags --match "v[0-9]*.[0-9]*.[0-9]*" --abbrev=0 2>/dev/null || echo "")
+        if [ -z "$root_latest" ]; then
+          echo "the root module has no release yet; run 'task release:minor' first" >&2
+          exit 1
+        fi
+        required=$(awk -v m="$MODULE" '$1 == m { print $2 }' {{.YDB_DIR}}/go.mod)
+        if [ "$required" != "$root_latest" ]; then
+          echo "{{.YDB_DIR}}/go.mod requires $MODULE $required but the latest release is $root_latest." >&2
+          echo "Release the root module first, then run:" >&2
+          echo "  (cd {{.YDB_DIR}} && go mod edit -require=$MODULE@$root_latest)" >&2
+          echo "  git commit -am 'ydb: require $MODULE $root_latest'" >&2
+          exit 1
+        fi
+
+        # --- compute next version from this module's own tags ---
+        if [ -n "$FORCED" ]; then
+          next="${PREFIX}${FORCED#$PREFIX}"
+        else
+          latest=$(git describe --tags --match "${PREFIX}v[0-9]*.[0-9]*.[0-9]*" --abbrev=0 2>/dev/null || echo "${PREFIX}v0.0.0")
+          v=${latest#${PREFIX}v}
+          major=${v%%.*}; rest=${v#*.}; minor=${rest%%.*}; patch=${rest#*.}
+          case "$BUMP" in
+            major) major=$((major+1)); minor=0; patch=0 ;;
+            minor) minor=$((minor+1)); patch=0 ;;
+            patch) patch=$((patch+1)) ;;
+            *) echo "unknown BUMP '$BUMP' (use patch|minor|major)" >&2; exit 1 ;;
+          esac
+          next="${PREFIX}v${major}.${minor}.${patch}"
+        fi
+
+        if git rev-parse "$next" >/dev/null 2>&1; then
+          echo "tag '$next' already exists" >&2
+          exit 1
+        fi
+
+        echo "Releasing $MODULE/{{.YDB_DIR}} $next ..."
+        git tag -a "$next" -m "Release $next"
+        git push "$REMOTE" "$MAIN_BRANCH"
+        git push "$REMOTE" "$next"
+        echo "Done. Consume it with: go get $MODULE/{{.YDB_DIR}}@${next#$PREFIX}"

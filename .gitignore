@@ -13,8 +13,9 @@ dist/
 coverage.*
 profile.*
 
-# Go workspace files
-go.work
+# Go workspace files. go.work itself is committed: the ydb submodule depends on
+# the root module, and without the workspace a fresh clone cannot build either
+# until the root module is published.
 go.work.sum
 
 # Environment / secrets

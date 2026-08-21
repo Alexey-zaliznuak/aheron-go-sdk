@@ -53,9 +53,9 @@ type Subject struct {
 }
 
 // SubjectVariableValue is a stored (or default-derived) variable value on a
-// subject.
+// subject. The row has no id of its own: it is addressed by
+// (project, subject, definition).
 type SubjectVariableValue struct {
-	ID                   string          `json:"id"`
 	SubjectID            string          `json:"subjectId"`
 	ProjectID            string          `json:"projectId"`
 	VariableDefinitionID string          `json:"variableDefinitionId"`

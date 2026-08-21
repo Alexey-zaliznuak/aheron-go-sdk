@@ -14,6 +14,9 @@ SDK для построения бэкендов интеграций Aheron н�
   подписывается приватным ключом интеграции — и содержит `CRM`-клиент для
   чтения/записи данных субъекта по project API key.
 
+Помимо этого в SDK есть `outbox` — relay транзакционного outbox, не зависящий
+ни от какой БД (см. ниже).
+
 Модуль: `github.com/Alexey-zaliznuak/aheron-go-sdk`. Требует Go 1.25+.
 
 ## Установка
@@ -21,6 +24,11 @@ SDK для построения бэкендов интеграций Aheron н�
 ```bash
 go get github.com/Alexey-zaliznuak/aheron-go-sdk/integration
 ```
+
+В репозитории два модуля. Корневой — тот, что нужен любой интеграции. Отдельно
+лежит `aheron-go-sdk/ydb` с YDB-спецификой; он вынесен в подмодуль, чтобы
+`ydb-go-sdk` вместе с деревом gRPC не попадал в `go.sum` интеграций на
+PostgreSQL. Ставится и версионируется независимо, см. [`ydb/README.md`](ydb/README.md).
 
 ## Модель доверия
 
@@ -354,11 +362,56 @@ http.HandleFunc("/console/data", func(w http.ResponseWriter, r *http.Request) {
 })
 ```
 
+## Транзакционный outbox (`outbox`)
+
+Пакет `aheron-go-sdk/outbox` публикует в брокер строки, записанные в одной
+транзакции с изменением, которое они описывают. Он **не зависит от базы**: всё
+его касание хранилища — интерфейс из двух методов, поэтому под ним одинаково
+работают PostgreSQL и YDB. Тяжёлых зависимостей у пакета нет вовсе.
+
+```go
+type Store interface {
+    ClaimBuckets(ctx context.Context, owner string, lease time.Duration) ([]int, error)
+    PublishBucket(ctx context.Context, bucket int, owner string, limit int,
+        publish func(context.Context, Event) error) (published int, err error)
+}
+```
+
+Очередь шардирована на бакеты, и инстанс публикует только те, на которые держит
+аренду. Инстансы делят очередь между собой вместо гонки за отдельные строки —
+именно это заменяет `SELECT ... FOR UPDATE SKIP LOCKED` там, где его нет. Один
+инстанс просто забирает все бакеты. Бакет, `partition_key` и партиция брокера
+связаны одним хешем, поэтому порядок событий одного ключа держится сквозным.
+
+```go
+relay := outbox.NewRelay(store, outbox.PublisherFunc(
+    func(ctx context.Context, ev outbox.Event) error {
+        return writer.WriteMessages(ctx, kafka.Message{
+            Topic: topic,
+            Key:   []byte(ev.PartitionKey),
+            Value: ev.Payload,
+        })
+    }),
+    outbox.Config{Logger: zaplog.New(log)},
+)
+go relay.Run(ctx)
+```
+
+Готовый `Store` на YDB — в подмодуле [`ydb`](ydb/README.md) вместе с DDL схемы.
+На PostgreSQL два метода пишутся своим SQL: `ClaimBuckets` — условный `UPDATE`
+по таблице аренд, `PublishBucket` — чтение головы бакета с удалением строки
+после успешной публикации.
+
+`outbox.BucketOf` обязан оставаться неизменным: бакет входит в первичный ключ, и
+смена хеша оставит уже записанные строки в бакетах, которые никто не опрашивает.
+На это есть тест с эталонными значениями.
+
 ## Логирование
 
 SDK не тянет конкретный логгер: передайте свою реализацию `integration.Logger`
 или используйте готовый zap-адаптер `github.com/Alexey-zaliznuak/aheron-go-sdk/integration/zaplog`. По
-умолчанию — молчание (no-op).
+умолчанию — молчание (no-op). `outbox` пишет в тот же интерфейс
+(`outbox.Logger` — псевдоним того же типа).
 
 ## Замечания по деплою
 
