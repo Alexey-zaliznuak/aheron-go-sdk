@@ -17,6 +17,8 @@ package integration
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
+	"path"
 	"strings"
 )
 
@@ -84,6 +86,40 @@ type Block struct {
 	SubflowDeclaration json.RawMessage
 }
 
+// ConsolePage is one page of the integration's console that the platform pins
+// into the sidebar of every project the integration is installed into.
+//
+// It exists to shorten a daily path: without it, reaching a section like the
+// dialogues of a messenger integration means opening the project, the
+// integrations list, the integration, its console and finally the tab.
+//
+// The page still opens as the console does — inside the platform, in an iframe,
+// authorized by a short-lived console view-token — so it must be a page the
+// integration already serves under its console.
+type ConsolePage struct {
+	// Key is the page's slug, matching ^[a-zA-Z0-9_-]+$ (e.g. "dialogs"). It
+	// identifies the entry, so changing it replaces one menu item with another.
+	Key string
+	// Label is the text shown next to the icon in the sidebar.
+	Label string
+	// Path is the page itself (e.g. "/console/dialogs").
+	Path string
+	// Icon is optional. Without one the platform renders the entry with its own
+	// fallback, so an integration can declare the page now and add artwork later.
+	Icon Icon
+}
+
+// Icon is a small image the platform stores in its own bucket and serves from
+// there. It travels inside the manifest rather than as a URL on the integration's
+// host: the sidebar of a project must not break when the integration is down,
+// and the platform will not fetch a URL an integration controls.
+type Icon struct {
+	// MimeType must be one of image/svg+xml, image/png or image/webp.
+	MimeType string
+	// Content is the raw image bytes, at most 32 KiB. They are sent as base64.
+	Content []byte
+}
+
 // Manifest is the full desired state of the integration's catalog entry: the
 // version contract plus the block set. It is declarative — whatever it omits is
 // cleared in the catalog, and whatever it declares replaces what is there.
@@ -92,6 +128,10 @@ type Block struct {
 type Manifest struct {
 	// ConsolePath is the integration's console page, opened inside a project.
 	ConsolePath string
+	// ConsolePages are the console pages the platform shows in a project's
+	// sidebar. Declaring none leaves the integration reachable the long way,
+	// through the integrations list.
+	ConsolePages []ConsolePage
 	// InstallPath receives InstallRequest when the integration is installed
 	// into a project, UninstallPath receives UninstallRequest when it is
 	// removed.
@@ -126,6 +166,7 @@ type Manifest struct {
 // platform reads as "clear it".
 type manifestBody struct {
 	ConsoleURL            string                         `json:"consoleUrl,omitempty"`
+	ConsolePages          []consolePageBody              `json:"consolePages,omitempty"`
 	InstallURL            string                         `json:"installUrl,omitempty"`
 	UninstallURL          string                         `json:"uninstallUrl,omitempty"`
 	ActionURL             string                         `json:"actionUrl,omitempty"`
@@ -135,6 +176,20 @@ type manifestBody struct {
 	VariableValueSources  map[string]VariableValueSource `json:"variableValueSources,omitempty"`
 	Blocks                []blockBody                    `json:"blocks"`
 	Retired               []string                       `json:"retired,omitempty"`
+}
+
+// consolePageBody is the wire shape of one resolved console page. Icon bytes
+// marshal as base64, which is what []byte does in encoding/json.
+type consolePageBody struct {
+	Key   string    `json:"key"`
+	Label string    `json:"label"`
+	URL   string    `json:"url"`
+	Icon  *iconBody `json:"icon,omitempty"`
+}
+
+type iconBody struct {
+	MimeType string `json:"mimeType"`
+	Content  []byte `json:"content"`
 }
 
 // blockBody is the wire shape of one resolved block declaration. Field names
@@ -193,6 +248,11 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 		return manifestBody{}, fmt.Errorf("integration: manifest ActionRequestTemplate is not valid JSON")
 	}
 
+	pages, err := m.resolveConsolePages(base)
+	if err != nil {
+		return manifestBody{}, err
+	}
+
 	retired := make(map[string]bool, len(m.Retired))
 	for _, key := range m.Retired {
 		if key == "" {
@@ -245,6 +305,7 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 
 	return manifestBody{
 		ConsoleURL:            consoleURL,
+		ConsolePages:          pages,
 		InstallURL:            installURL,
 		UninstallURL:          uninstallURL,
 		ActionURL:             actionURL,
@@ -255,6 +316,101 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 		Blocks:                blocks,
 		Retired:               m.Retired,
 	}, nil
+}
+
+// Limits on the sidebar declaration. The whole manifest, icons included, travels
+// in one signed request, and the platform caps that body at 1 MiB — these two
+// numbers are what keeps a manifest comfortably inside it. They are also a sanity
+// bound on the sidebar itself: a menu of eight entries is already a lot.
+const (
+	maxConsolePages = 8
+	maxIconBytes    = 32 * 1024
+)
+
+// iconMimeTypes is the set the platform stores. It is short because the browser
+// renders these straight from the platform's bucket.
+var iconMimeTypes = map[string]bool{
+	"image/svg+xml": true,
+	"image/png":     true,
+	"image/webp":    true,
+}
+
+// resolveConsolePages validates the sidebar declaration and turns page paths into
+// absolute URLs.
+func (m Manifest) resolveConsolePages(base string) ([]consolePageBody, error) {
+	if len(m.ConsolePages) == 0 {
+		return nil, nil
+	}
+	if len(m.ConsolePages) > maxConsolePages {
+		return nil, fmt.Errorf("integration: manifest declares %d console pages, at most %d are allowed", len(m.ConsolePages), maxConsolePages)
+	}
+
+	pages := make([]consolePageBody, 0, len(m.ConsolePages))
+	seen := make(map[string]bool, len(m.ConsolePages))
+	for i, p := range m.ConsolePages {
+		if p.Key == "" {
+			return nil, fmt.Errorf("integration: manifest console page #%d has no Key", i)
+		}
+		if seen[p.Key] {
+			return nil, fmt.Errorf("integration: manifest declares console page %q twice", p.Key)
+		}
+		seen[p.Key] = true
+		if p.Label == "" {
+			return nil, fmt.Errorf("integration: manifest console page %q has no Label", p.Key)
+		}
+		if p.Path == "" {
+			return nil, fmt.Errorf("integration: manifest console page %q has no Path", p.Key)
+		}
+		url, err := resolveURL(base, p.Path, fmt.Sprintf("console page %q Path", p.Key))
+		if err != nil {
+			return nil, err
+		}
+
+		page := consolePageBody{Key: p.Key, Label: p.Label, URL: url}
+		if len(p.Icon.Content) > 0 || p.Icon.MimeType != "" {
+			icon, err := p.Icon.validate(p.Key)
+			if err != nil {
+				return nil, err
+			}
+			page.Icon = &icon
+		}
+		pages = append(pages, page)
+	}
+	return pages, nil
+}
+
+func (i Icon) validate(pageKey string) (iconBody, error) {
+	if !iconMimeTypes[i.MimeType] {
+		return iconBody{}, fmt.Errorf("integration: console page %q icon has unsupported MimeType %q", pageKey, i.MimeType)
+	}
+	if len(i.Content) == 0 {
+		return iconBody{}, fmt.Errorf("integration: console page %q icon has no Content", pageKey)
+	}
+	if len(i.Content) > maxIconBytes {
+		return iconBody{}, fmt.Errorf("integration: console page %q icon is %d bytes, at most %d are allowed", pageKey, len(i.Content), maxIconBytes)
+	}
+	return iconBody{MimeType: i.MimeType, Content: i.Content}, nil
+}
+
+// IconFromFS reads an icon out of a filesystem — in practice the go:embed FS an
+// integration already uses for its web assets, so the icon is part of the binary
+// and cannot go missing at runtime. The MIME type comes from the file extension.
+func IconFromFS(fsys fs.FS, name string) (Icon, error) {
+	content, err := fs.ReadFile(fsys, name)
+	if err != nil {
+		return Icon{}, fmt.Errorf("integration: read icon %q: %w", name, err)
+	}
+	mimeType, ok := iconMimeByExt[strings.ToLower(path.Ext(name))]
+	if !ok {
+		return Icon{}, fmt.Errorf("integration: icon %q has an unsupported extension, want .svg, .png or .webp", name)
+	}
+	return Icon{MimeType: mimeType, Content: content}, nil
+}
+
+var iconMimeByExt = map[string]string{
+	".svg":  "image/svg+xml",
+	".png":  "image/png",
+	".webp": "image/webp",
 }
 
 // resolveURL joins a manifest path onto the public base URL. An empty path means

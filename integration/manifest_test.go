@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
@@ -62,6 +63,111 @@ func TestManifestResolvePathsAgainstPublicBaseURL(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"inputs":[]`) {
 		t.Errorf("empty inputs should marshal as []: %s", raw)
+	}
+}
+
+func TestManifestResolveConsolePages(t *testing.T) {
+	m := Manifest{
+		ConsolePath: "/console",
+		ConsolePages: []ConsolePage{
+			{Key: "dialogs", Label: "Диалоги", Path: "/console/dialogs",
+				Icon: Icon{MimeType: "image/svg+xml", Content: []byte("<svg/>")}},
+			{Key: "files", Label: "Файлы", Path: "/console/files"},
+		},
+	}
+
+	body, err := m.resolve("https://messengers.aheron.pro")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(body.ConsolePages) != 2 {
+		t.Fatalf("ConsolePages = %+v", body.ConsolePages)
+	}
+	// Order is the declaration order: it is what the sidebar shows.
+	if body.ConsolePages[0].Key != "dialogs" || body.ConsolePages[1].Key != "files" {
+		t.Errorf("pages lost their declared order: %+v", body.ConsolePages)
+	}
+	if body.ConsolePages[0].URL != "https://messengers.aheron.pro/console/dialogs" {
+		t.Errorf("page URL = %q", body.ConsolePages[0].URL)
+	}
+	if body.ConsolePages[0].Icon == nil || body.ConsolePages[0].Icon.MimeType != "image/svg+xml" {
+		t.Errorf("icon was not carried: %+v", body.ConsolePages[0].Icon)
+	}
+	// A page may ship without artwork; the platform renders a fallback.
+	if body.ConsolePages[1].Icon != nil {
+		t.Errorf("page without an icon should send none: %+v", body.ConsolePages[1].Icon)
+	}
+
+	// Icon bytes travel as base64, and a page without an icon omits the field.
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), base64.StdEncoding.EncodeToString([]byte("<svg/>"))) {
+		t.Errorf("icon content should marshal as base64: %s", raw)
+	}
+	if strings.Count(string(raw), `"icon"`) != 1 {
+		t.Errorf("exactly one page declares an icon: %s", raw)
+	}
+}
+
+func TestManifestResolveRejectsBadConsolePages(t *testing.T) {
+	tooMany := make([]ConsolePage, maxConsolePages+1)
+	for i := range tooMany {
+		tooMany[i] = ConsolePage{Key: string(rune('a' + i)), Label: "L", Path: "/p"}
+	}
+
+	cases := map[string][]ConsolePage{
+		"no key":   {{Label: "Диалоги", Path: "/console/dialogs"}},
+		"no label": {{Key: "dialogs", Path: "/console/dialogs"}},
+		"no path":  {{Key: "dialogs", Label: "Диалоги"}},
+		"duplicate key": {
+			{Key: "dialogs", Label: "Диалоги", Path: "/console/dialogs"},
+			{Key: "dialogs", Label: "Чаты", Path: "/console/chats"},
+		},
+		"path without leading slash": {{Key: "dialogs", Label: "Диалоги", Path: "console/dialogs"}},
+		"unsupported icon type": {{Key: "dialogs", Label: "Диалоги", Path: "/console/dialogs",
+			Icon: Icon{MimeType: "image/gif", Content: []byte("GIF89a")}}},
+		"icon type without content": {{Key: "dialogs", Label: "Диалоги", Path: "/console/dialogs",
+			Icon: Icon{MimeType: "image/png"}}},
+		"icon content without type": {{Key: "dialogs", Label: "Диалоги", Path: "/console/dialogs",
+			Icon: Icon{Content: []byte("<svg/>")}}},
+		"icon too large": {{Key: "dialogs", Label: "Диалоги", Path: "/console/dialogs",
+			Icon: Icon{MimeType: "image/png", Content: make([]byte, maxIconBytes+1)}}},
+		"too many pages": tooMany,
+	}
+
+	for name, pages := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := (Manifest{ConsolePages: pages}).resolve("https://messengers.aheron.pro"); err == nil {
+				t.Fatal("want error, got nil")
+			}
+		})
+	}
+}
+
+func TestIconFromFS(t *testing.T) {
+	fsys := fstest.MapFS{
+		"icons/dialogs.svg": &fstest.MapFile{Data: []byte("<svg/>")},
+		"icons/dialogs.png": &fstest.MapFile{Data: []byte{0x89, 'P', 'N', 'G'}},
+		"icons/notes.txt":   &fstest.MapFile{Data: []byte("nope")},
+	}
+
+	icon, err := IconFromFS(fsys, "icons/dialogs.svg")
+	if err != nil {
+		t.Fatalf("IconFromFS: %v", err)
+	}
+	if icon.MimeType != "image/svg+xml" || string(icon.Content) != "<svg/>" {
+		t.Errorf("icon = %+v", icon)
+	}
+	if icon, err := IconFromFS(fsys, "icons/dialogs.png"); err != nil || icon.MimeType != "image/png" {
+		t.Errorf("png icon = %+v, err = %v", icon, err)
+	}
+	if _, err := IconFromFS(fsys, "icons/notes.txt"); err == nil {
+		t.Error("an unsupported extension must be rejected")
+	}
+	if _, err := IconFromFS(fsys, "icons/missing.svg"); err == nil {
+		t.Error("a missing file must be reported")
 	}
 }
 
