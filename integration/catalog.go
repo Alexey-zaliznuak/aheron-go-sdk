@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
+	"time"
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/httpclient"
+	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/logx"
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
 )
 
@@ -23,6 +26,7 @@ type CatalogClient struct {
 	id            string
 	signer        *sign.Signer
 	publicBaseURL string
+	log           logx.Logger
 }
 
 // SyncResult reports what the platform did with the manifest.
@@ -82,4 +86,90 @@ func (c *CatalogClient) Sync(ctx context.Context, m Manifest) (SyncResult, error
 		}
 	}
 	return out, nil
+}
+
+// Startup sync pacing. The initial jitter spreads the replicas of one
+// integration, which all start within a second of each other during a rolling
+// update: without it they would race to publish the same manifest and all but one
+// would do the extra round trip of losing that race.
+const (
+	syncStartJitter  = 3 * time.Second
+	syncAttempts     = 5
+	syncBackoffStart = 2 * time.Second
+	syncBackoffMax   = 30 * time.Second
+)
+
+// StartSync publishes the manifest in the background and logs the outcome. Call
+// it in a goroutine from the service's start-up path:
+//
+//	go client.Catalog.StartSync(ctx, catalog.Manifest())
+//
+// It never returns an error and must never gate readiness. A catalog that is
+// unreachable is not a reason to stop serving the actions and webhooks the
+// integration already has published declarations for — the worst case is that the
+// new declarations land on the next restart.
+//
+// It waits out a short jitter, then retries a handful of times with backoff,
+// stopping as soon as the sync succeeds or ctx is cancelled.
+func (c *CatalogClient) StartSync(ctx context.Context, m Manifest) {
+	if !sleepCtx(ctx, rand.N(syncStartJitter)) {
+		return
+	}
+
+	backoff := syncBackoffStart
+	for attempt := 1; attempt <= syncAttempts; attempt++ {
+		result, err := c.Sync(ctx, m)
+		if err == nil {
+			switch {
+			case !result.Changed:
+				c.log.Info("integration catalog already up to date",
+					logx.F("version", result.Version))
+			case result.Published:
+				c.log.Info("integration catalog published a new version",
+					logx.F("version", result.Version))
+			default:
+				// A draft that needs a human (a subflow block with no sub-scheme).
+				c.log.Warn("integration catalog version prepared but not published",
+					logx.F("version", result.Version),
+					logx.F("reason", result.Reason))
+			}
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+
+		if attempt == syncAttempts {
+			c.log.Error("integration catalog sync failed, giving up until the next start",
+				logx.F("attempts", attempt),
+				logx.F("error", err.Error()))
+			return
+		}
+		c.log.Warn("integration catalog sync failed, retrying",
+			logx.F("attempt", attempt),
+			logx.F("retryIn", backoff.String()),
+			logx.F("error", err.Error()))
+
+		if !sleepCtx(ctx, backoff) {
+			return
+		}
+		if backoff *= 2; backoff > syncBackoffMax {
+			backoff = syncBackoffMax
+		}
+	}
+}
+
+// sleepCtx waits for d, reporting false when ctx was cancelled first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return true
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }

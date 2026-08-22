@@ -174,6 +174,7 @@ func New(cfg Config) (*Client, error) {
 		id:            cfg.IntegrationID,
 		signer:        signer,
 		publicBaseURL: cfg.PublicBaseURL,
+		log:           cfg.Logger,
 	}
 	return c, nil
 }

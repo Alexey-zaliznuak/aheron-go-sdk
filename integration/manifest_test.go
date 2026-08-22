@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
 )
@@ -211,6 +213,92 @@ func TestCatalogSyncFailsBeforeSigningOnBadManifest(t *testing.T) {
 	// Relative paths with no PublicBaseURL configured.
 	if _, err := client.Catalog.Sync(context.Background(), Manifest{ActionPath: "/api/actions"}); err == nil {
 		t.Fatal("want error, got nil")
+	}
+}
+
+// StartSync must survive a catalog that is briefly down: the integration keeps
+// serving the declarations it published earlier, so a failed sync is a retry and a
+// log line, not a reason to stop.
+func TestCatalogStartSyncRetriesUntilItSucceeds(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"changed":true,"version":8,"published":true}`))
+	}))
+	defer srv.Close()
+
+	client := newCatalogTestClient(t, priv, srv.URL)
+	client.Catalog.StartSync(context.Background(), Manifest{ActionPath: "/api/actions"})
+
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("catalog was called %d times, want 2 (one failure then one success)", got)
+	}
+}
+
+// A pod being replaced cancels the start-up context. StartSync must return then
+// instead of holding the process through its whole retry schedule.
+func TestCatalogStartSyncStopsWhenContextIsCancelled(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := newCatalogTestClient(t, priv, srv.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		client.Catalog.StartSync(ctx, Manifest{ActionPath: "/api/actions"})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("StartSync did not stop on a cancelled context")
+	}
+}
+
+func newCatalogTestClient(t *testing.T, priv ed25519.PrivateKey, baseURL string) *Client {
+	t.Helper()
+	client, err := New(Config{
+		IntegrationID: "11111111-1111-1111-1111-111111111111",
+		PrivateKey:    base64.StdEncoding.EncodeToString(priv),
+		CatalogURL:    baseURL + "/api",
+		PublicBaseURL: "https://sheets.aheron.pro",
+		// A 500 is not retried by the transport, so each attempt here is one call.
+		RetryCount: -1,
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	return client
+}
+
+func TestCatalogStartSyncStopsAfterSuccess(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"changed":false,"version":7,"published":true}`))
+	}))
+	defer srv.Close()
+
+	client := newCatalogTestClient(t, priv, srv.URL)
+	client.Catalog.StartSync(context.Background(), Manifest{ActionPath: "/api/actions"})
+
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("catalog was called %d times, want exactly 1", got)
 	}
 }
 
