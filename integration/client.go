@@ -3,9 +3,10 @@
 //
 //   - Outbound (integration -> platform): a Client that calls the platform's
 //     signed endpoints — resolve a parked integrationAction step, activate a
-//     trigger, list trigger instances — plus a CRM client for reading/writing
-//     subject data with a project API key. Every signed call is authenticated
-//     with the integration's own Ed25519 private key.
+//     trigger, list trigger instances, publish the integration's own catalog
+//     manifest — plus a CRM client for reading/writing subject data with a
+//     project API key. Every signed call is authenticated with the integration's
+//     own Ed25519 private key.
 //   - Inbound (platform -> integration): a Verifier that authenticates the
 //     signed requests the platform sends to the integration backend (install and
 //     action), so handlers run only on verified bodies they decode themselves.
@@ -34,10 +35,13 @@ import (
 //   - CRMURL carries the gateway's "/api/crm" prefix: CRM calls hit
 //     "{CRMURL}/projects/...", matching the platform's public CRM routes.
 //   - MediaURL carries the gateway's "/api/media" prefix.
+//   - CatalogURL carries the bare gateway "/api" prefix: the catalog lives on
+//     the platform backend, whose routes are "/api/integrations/...".
 const (
 	DefaultExecutionURL = "https://aheron.pro/api/execution"
 	DefaultCRMURL       = "https://aheron.pro/api/crm"
 	DefaultMediaURL     = "https://aheron.pro/api/media"
+	DefaultCatalogURL   = "https://aheron.pro/api"
 )
 
 // DefaultJWKSURL is the platform's well-known integration JWKS endpoint on
@@ -71,6 +75,15 @@ type Config struct {
 	// MediaURL is the base URL of the media-service public API. Defaults to
 	// DefaultMediaURL.
 	MediaURL string
+	// CatalogURL is the base URL of the platform backend's public API, carrying
+	// the gateway's "/api" prefix. Defaults to DefaultCatalogURL. Used by the
+	// Catalog client.
+	CatalogURL string
+
+	// PublicBaseURL is this integration's own externally reachable base URL, with
+	// no trailing slash. Catalog.Sync resolves the relative paths of a Manifest
+	// against it, which is what keeps deployment addresses out of the source.
+	PublicBaseURL string
 
 	// Transport tuning. Zero values fall back to the httpclient defaults.
 	Timeout      time.Duration
@@ -95,6 +108,8 @@ type Client struct {
 	// Files stores and retrieves project media files with the project API key.
 	// It is nil-safe: calling it without an APIKey configured returns an error.
 	Files *FilesClient
+	// Catalog publishes this integration's own block and endpoint declarations.
+	Catalog *CatalogClient
 
 	integrationID string
 	signer        *sign.Signer
@@ -113,6 +128,9 @@ func New(cfg Config) (*Client, error) {
 	}
 	if cfg.MediaURL == "" {
 		cfg.MediaURL = DefaultMediaURL
+	}
+	if cfg.CatalogURL == "" {
+		cfg.CatalogURL = DefaultCatalogURL
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = NopLogger()
@@ -141,6 +159,7 @@ func New(cfg Config) (*Client, error) {
 	execHTTP := httpclient.New(transportCfg(cfg.ExecutionURL))
 	crmHTTP := httpclient.New(transportCfg(cfg.CRMURL))
 	mediaHTTP := httpclient.New(transportCfg(cfg.MediaURL))
+	catalogHTTP := httpclient.New(transportCfg(cfg.CatalogURL))
 
 	c := &Client{
 		integrationID: cfg.IntegrationID,
@@ -150,6 +169,12 @@ func New(cfg Config) (*Client, error) {
 	c.Triggers = &TriggersClient{http: execHTTP, id: cfg.IntegrationID, signer: signer}
 	c.CRM = &CRMClient{http: crmHTTP, apiKey: cfg.APIKey}
 	c.Files = &FilesClient{http: mediaHTTP, apiKey: cfg.APIKey}
+	c.Catalog = &CatalogClient{
+		http:          catalogHTTP,
+		id:            cfg.IntegrationID,
+		signer:        signer,
+		publicBaseURL: cfg.PublicBaseURL,
+	}
 	return c, nil
 }
 
