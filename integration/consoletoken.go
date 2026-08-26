@@ -34,6 +34,13 @@ import (
 const (
 	consoleExpectedIssuer  = "aheron"
 	consoleExpectedPurpose = "integration-console"
+
+	// ConsolePermissionRead is present for every active project member.
+	ConsolePermissionRead = "console.read"
+	// ConsolePermissionWrite is present only for the project owner and admins.
+	// Integration backends must require it before using their stored project API
+	// key for a console-requested mutation.
+	ConsolePermissionWrite = "console.write"
 )
 
 // consoleLeeway absorbs small clock skew between the platform and the
@@ -49,7 +56,18 @@ var ErrConsoleTokenInvalid = errors.New("integration: console view-token verific
 type ConsoleClaims struct {
 	ProjectID     string
 	IntegrationID string
+	Permissions   []string
 	ExpiresAt     time.Time
+}
+
+// HasPermission reports whether the verified token contains permission.
+func (c ConsoleClaims) HasPermission(permission string) bool {
+	for _, granted := range c.Permissions {
+		if granted == permission {
+			return true
+		}
+	}
+	return false
 }
 
 // ConsoleVerifierConfig configures a ConsoleVerifier.
@@ -103,6 +121,7 @@ type consoleJWTClaims struct {
 	ProjectID     string          `json:"projectId"`
 	IntegrationID string          `json:"integrationId"`
 	Purpose       string          `json:"purpose"`
+	Permissions   []string        `json:"permissions"`
 }
 
 // Verify parses and fully validates a console view-token: the EdDSA signature
@@ -189,6 +208,7 @@ func (v *ConsoleVerifier) Verify(ctx context.Context, token string) (ConsoleClai
 	return ConsoleClaims{
 		ProjectID:     claims.ProjectID,
 		IntegrationID: v.integrationID,
+		Permissions:   append([]string(nil), claims.Permissions...),
 		ExpiresAt:     exp,
 	}, nil
 }

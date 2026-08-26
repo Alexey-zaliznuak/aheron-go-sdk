@@ -352,7 +352,11 @@ Iframe консоли (`integrations.console_url`) открывается вну
 подписанный view-token (через `postMessage`), а iframe шлёт его на бэкенд
 интеграции. `ConsoleVerifier` проверяет EdDSA-подпись токена по тому же JWKS
 платформы (переиспользует общий загрузчик ключей) и claims (`iss`/`aud`/`purpose`/
-`exp`/`nbf`), после чего можно доверять `ProjectID`. Любая ошибка оборачивает
+`exp`/`nbf`), после чего можно доверять `ProjectID` и `Permissions`. Платформа
+выдаёт `console.read` любому участнику проекта, а `console.write` — только
+владельцу и администраторам. Перед console-мутацией проверяйте
+`claims.HasPermission(integration.ConsolePermissionWrite)`: сохранённый project
+API key интеграции намеренно шире прав человека, открывшего iframe. Любая ошибка оборачивает
 `ErrConsoleTokenInvalid` — отвечайте `401`, не раскрывая причину.
 
 ```go
@@ -364,6 +368,10 @@ http.HandleFunc("/console/data", func(w http.ResponseWriter, r *http.Request) {
 	claims, err := consoleV.Verify(r.Context(), r.Header.Get("Authorization"))
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if !claims.HasPermission(integration.ConsolePermissionWrite) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	// claims.ProjectID теперь доверенный — отдать данные консоли по проекту.

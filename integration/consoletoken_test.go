@@ -70,6 +70,7 @@ func validConsoleClaims(integrationID, projectID string) map[string]any {
 		"purpose":       consoleExpectedPurpose,
 		"projectId":     projectID,
 		"integrationId": integrationID,
+		"permissions":   []string{ConsolePermissionRead, ConsolePermissionWrite},
 		"iat":           now.Unix(),
 		"nbf":           now.Unix(),
 		"exp":           now.Add(5 * time.Minute).Unix(),
@@ -110,6 +111,12 @@ func TestConsoleVerifyValidToken(t *testing.T) {
 	}
 	if claims.ExpiresAt.IsZero() {
 		t.Fatal("ExpiresAt is zero")
+	}
+	if !claims.HasPermission(ConsolePermissionRead) || !claims.HasPermission(ConsolePermissionWrite) {
+		t.Fatalf("unexpected permissions: %v", claims.Permissions)
+	}
+	if claims.HasPermission("console.unknown") {
+		t.Fatal("HasPermission accepted an ungranted permission")
 	}
 }
 

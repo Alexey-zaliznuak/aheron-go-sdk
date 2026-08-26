@@ -289,6 +289,26 @@ func (c *CRMClient) ListVariableDefinitions(ctx context.Context, projectID strin
 	return out, nil
 }
 
+// GetVariableDefinition returns one subject variable definition by id.
+func (c *CRMClient) GetVariableDefinition(ctx context.Context, projectID, definitionID string) (VariableDefinition, error) {
+	if projectID == "" || definitionID == "" {
+		return VariableDefinition{}, fmt.Errorf("integration: GetVariableDefinition requires projectID and definitionID")
+	}
+	req, err := c.bearerRequest(http.MethodGet, "/projects/"+projectID+"/variable-definitions/"+definitionID, nil, nil, true)
+	if err != nil {
+		return VariableDefinition{}, err
+	}
+	resp, err := c.http.Do(ctx, req)
+	if err != nil {
+		return VariableDefinition{}, err
+	}
+	var out VariableDefinition
+	if err := json.Unmarshal(resp.Body, &out); err != nil {
+		return VariableDefinition{}, fmt.Errorf("integration: decode variable definition: %w", err)
+	}
+	return out, nil
+}
+
 // CreateVariableDefinitionParams is the payload to create a subject variable
 // definition. Name and Key are required. Type defaults to "string" server-side
 // when empty. DefaultValue, when non-nil, is JSON-encoded.
@@ -304,6 +324,24 @@ type createVariableDefinitionBody struct {
 	Name         string          `json:"name"`
 	Key          string          `json:"key"`
 	Type         string          `json:"type,omitempty"`
+	Description  *string         `json:"description,omitempty"`
+	DefaultValue json.RawMessage `json:"defaultValue,omitempty"`
+}
+
+// UpdateVariableDefinitionParams is a partial update of a project-owned
+// subject variable definition. Nil fields are left unchanged.
+type UpdateVariableDefinitionParams struct {
+	Name         *string
+	Key          *string
+	Type         *string
+	Description  *string
+	DefaultValue any
+}
+
+type updateVariableDefinitionBody struct {
+	Name         *string         `json:"name,omitempty"`
+	Key          *string         `json:"key,omitempty"`
+	Type         *string         `json:"type,omitempty"`
 	Description  *string         `json:"description,omitempty"`
 	DefaultValue json.RawMessage `json:"defaultValue,omitempty"`
 }
@@ -352,6 +390,58 @@ func (c *CRMClient) CreateVariableDefinition(ctx context.Context, projectID stri
 		return VariableDefinition{}, fmt.Errorf("integration: decode variable definition: %w", err)
 	}
 	return out, nil
+}
+
+// UpdateVariableDefinition partially updates a project-owned subject variable
+// definition. Integration-owned definitions are managed by their owner and
+// should not be passed to this method.
+func (c *CRMClient) UpdateVariableDefinition(ctx context.Context, projectID, definitionID string, p UpdateVariableDefinitionParams) (VariableDefinition, error) {
+	if projectID == "" || definitionID == "" {
+		return VariableDefinition{}, fmt.Errorf("integration: UpdateVariableDefinition requires projectID and definitionID")
+	}
+
+	var defaultRaw json.RawMessage
+	if p.DefaultValue != nil {
+		raw, err := json.Marshal(p.DefaultValue)
+		if err != nil {
+			return VariableDefinition{}, fmt.Errorf("integration: marshal default value: %w", err)
+		}
+		defaultRaw = raw
+	}
+	body, err := json.Marshal(updateVariableDefinitionBody{
+		Name: p.Name, Key: p.Key, Type: p.Type, Description: p.Description, DefaultValue: defaultRaw,
+	})
+	if err != nil {
+		return VariableDefinition{}, fmt.Errorf("integration: marshal variable definition update: %w", err)
+	}
+
+	req, err := c.bearerRequest(http.MethodPatch, "/projects/"+projectID+"/variable-definitions/"+definitionID, nil, body, true)
+	if err != nil {
+		return VariableDefinition{}, err
+	}
+	resp, err := c.http.Do(ctx, req)
+	if err != nil {
+		return VariableDefinition{}, err
+	}
+	var out VariableDefinition
+	if err := json.Unmarshal(resp.Body, &out); err != nil {
+		return VariableDefinition{}, fmt.Errorf("integration: decode variable definition: %w", err)
+	}
+	return out, nil
+}
+
+// DeleteVariableDefinition deletes a project-owned subject variable definition
+// and its stored subject values.
+func (c *CRMClient) DeleteVariableDefinition(ctx context.Context, projectID, definitionID string) error {
+	if projectID == "" || definitionID == "" {
+		return fmt.Errorf("integration: DeleteVariableDefinition requires projectID and definitionID")
+	}
+	req, err := c.bearerRequest(http.MethodDelete, "/projects/"+projectID+"/variable-definitions/"+definitionID, nil, nil, true)
+	if err != nil {
+		return err
+	}
+	_, err = c.http.Do(ctx, req)
+	return err
 }
 
 // EnsureVariableDefinition creates a variable definition, treating an
@@ -437,6 +527,121 @@ func (c *CRMClient) EnsureIntegrationVariableDefinition(ctx context.Context, pro
 		return err
 	}
 	return nil
+}
+
+// Tag is a project tag that may be assigned to subjects.
+type Tag struct {
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"projectId"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+// CreateTagParams is the payload for creating a project tag.
+type CreateTagParams struct {
+	Name        string
+	Description *string
+}
+
+// UpdateTagParams is a partial tag update. Nil fields are left unchanged.
+type UpdateTagParams struct {
+	Name        *string
+	Description *string
+}
+
+type createTagBody struct {
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+}
+
+type updateTagBody struct {
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+}
+
+// ListTags returns all tags in a project.
+func (c *CRMClient) ListTags(ctx context.Context, projectID string) ([]Tag, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("integration: ListTags requires projectID")
+	}
+	req, err := c.bearerRequest(http.MethodGet, "/projects/"+projectID+"/tags", nil, nil, true)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var out []Tag
+	if err := json.Unmarshal(resp.Body, &out); err != nil {
+		return nil, fmt.Errorf("integration: decode tags: %w", err)
+	}
+	return out, nil
+}
+
+// CreateTag creates a project tag.
+func (c *CRMClient) CreateTag(ctx context.Context, projectID string, p CreateTagParams) (Tag, error) {
+	if projectID == "" {
+		return Tag{}, fmt.Errorf("integration: CreateTag requires projectID")
+	}
+	if p.Name == "" {
+		return Tag{}, fmt.Errorf("integration: CreateTag requires name")
+	}
+	body, err := json.Marshal(createTagBody{Name: p.Name, Description: p.Description})
+	if err != nil {
+		return Tag{}, fmt.Errorf("integration: marshal tag: %w", err)
+	}
+	req, err := c.bearerRequest(http.MethodPost, "/projects/"+projectID+"/tags", nil, body, false)
+	if err != nil {
+		return Tag{}, err
+	}
+	resp, err := c.http.Do(ctx, req)
+	if err != nil {
+		return Tag{}, err
+	}
+	var out Tag
+	if err := json.Unmarshal(resp.Body, &out); err != nil {
+		return Tag{}, fmt.Errorf("integration: decode tag: %w", err)
+	}
+	return out, nil
+}
+
+// UpdateTag partially updates a project tag.
+func (c *CRMClient) UpdateTag(ctx context.Context, projectID, tagID string, p UpdateTagParams) (Tag, error) {
+	if projectID == "" || tagID == "" {
+		return Tag{}, fmt.Errorf("integration: UpdateTag requires projectID and tagID")
+	}
+	body, err := json.Marshal(updateTagBody{Name: p.Name, Description: p.Description})
+	if err != nil {
+		return Tag{}, fmt.Errorf("integration: marshal tag update: %w", err)
+	}
+	req, err := c.bearerRequest(http.MethodPatch, "/projects/"+projectID+"/tags/"+tagID, nil, body, true)
+	if err != nil {
+		return Tag{}, err
+	}
+	resp, err := c.http.Do(ctx, req)
+	if err != nil {
+		return Tag{}, err
+	}
+	var out Tag
+	if err := json.Unmarshal(resp.Body, &out); err != nil {
+		return Tag{}, fmt.Errorf("integration: decode tag: %w", err)
+	}
+	return out, nil
+}
+
+// DeleteTag deletes a project tag and all of its subject assignments.
+func (c *CRMClient) DeleteTag(ctx context.Context, projectID, tagID string) error {
+	if projectID == "" || tagID == "" {
+		return fmt.Errorf("integration: DeleteTag requires projectID and tagID")
+	}
+	req, err := c.bearerRequest(http.MethodDelete, "/projects/"+projectID+"/tags/"+tagID, nil, nil, true)
+	if err != nil {
+		return err
+	}
+	_, err = c.http.Do(ctx, req)
+	return err
 }
 
 func (c *CRMClient) bearerRequest(method, path string, query map[string]string, body []byte, idempotent bool) (httpclient.Request, error) {
