@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -219,6 +220,89 @@ func TestReactivateSendsModeAndStepID(t *testing.T) {
 	// StepID is mandatory for reactivation.
 	if err := c.Steps.Reactivate(context.Background(), ExecutionContext{ID: "ctx-9"}, "btn-1", nil); err == nil {
 		t.Fatal("expected error without StepID")
+	}
+}
+
+func TestResolveOptionsSendStableIdempotencyKey(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	seed := base64.StdEncoding.EncodeToString(priv.Seed())
+
+	var bodies [][]byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, body)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{IntegrationID: "int-1", PrivateKey: seed, ExecutionURL: srv.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	ec := ExecutionContext{ID: "ctx-9", Version: 3, StepID: "step-7"}
+	options := ResolveOptions{IdempotencyKey: "interaction:stable-1"}
+	if err := c.Steps.ResolveWithOptions(context.Background(), ec, "ok", nil, options); err != nil {
+		t.Fatalf("resolve with options: %v", err)
+	}
+	if err := c.Steps.ReactivateWithOptions(context.Background(), ec, "ok", nil, options); err != nil {
+		t.Fatalf("reactivate with options: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("requests = %d, want 2", len(bodies))
+	}
+	for i, body := range bodies {
+		var decoded map[string]any
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("decode body %d: %v", i, err)
+		}
+		if decoded["idempotencyKey"] != options.IdempotencyKey {
+			t.Fatalf("body %d idempotencyKey = %v", i, decoded["idempotencyKey"])
+		}
+	}
+}
+
+func TestLegacyResolveOmitsIdempotencyKey(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	seed := base64.StdEncoding.EncodeToString(priv.Seed())
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+	c, _ := New(Config{IntegrationID: "int-1", PrivateKey: seed, ExecutionURL: srv.URL})
+	if err := c.Steps.Resolve(context.Background(), ExecutionContext{ID: "ctx-1", Version: 1}, "ok", nil); err != nil {
+		t.Fatalf("legacy resolve: %v", err)
+	}
+	var decoded map[string]any
+	_ = json.Unmarshal(body, &decoded)
+	if _, exists := decoded["idempotencyKey"]; exists {
+		t.Fatalf("legacy body unexpectedly contains idempotencyKey: %s", body)
+	}
+}
+
+func TestResolveOptionsRejectVariablesAndOversizedKeyBeforeRequest(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	seed := base64.StdEncoding.EncodeToString(priv.Seed())
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+	c, err := New(Config{IntegrationID: "int-1", PrivateKey: seed, ExecutionURL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ec := ExecutionContext{ID: "ctx-1", Version: 1, StepID: "step-1"}
+	if err := c.Steps.ResolveWithOptions(context.Background(), ec, "ok", map[string]any{"answer": true}, ResolveOptions{IdempotencyKey: "stable"}); err == nil {
+		t.Fatal("keyed resolve with variables unexpectedly succeeded")
+	}
+	if err := c.Steps.ReactivateWithOptions(context.Background(), ec, "ok", nil, ResolveOptions{IdempotencyKey: strings.Repeat("x", 257)}); err == nil {
+		t.Fatal("reactivate with oversized idempotency key unexpectedly succeeded")
+	}
+	if requests != 0 {
+		t.Fatalf("invalid keyed requests reached HTTP: %d", requests)
 	}
 }
 

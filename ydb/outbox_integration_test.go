@@ -10,6 +10,7 @@ import (
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/outbox"
 
+	"github.com/google/uuid"
 	ydbsdk "github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/query"
 )
@@ -329,15 +330,184 @@ func TestExhaustedRowMovesToDeadLetters(t *testing.T) {
 	}
 }
 
+func TestTransientFailureDoesNotConsumeAttempts(t *testing.T) {
+	store, ctx := testStore(t, OutboxConfig{MaxAttempts: 2})
+	const owner = "owner-a"
+
+	written := enqueue(t, ctx, store, "subject-1", `{"n":1}`)
+	if _, err := store.ClaimBuckets(ctx, owner, time.Minute); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	fail := func(context.Context, outbox.Event) error {
+		return outbox.Transient(errors.New("kafka unavailable"), 0)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := store.PublishBucket(ctx, written.Bucket, owner, 10, fail); err == nil {
+			t.Fatalf("failure %d did not surface", i+1)
+		}
+	}
+	if got := attemptsOf(t, ctx, store, written); got != 0 {
+		t.Fatalf("attempts = %d after transient outage, want 0", got)
+	}
+	if got := countRows(t, ctx, store, store.dead); got != 0 {
+		t.Fatalf("dead rows = %d after transient outage, want 0", got)
+	}
+
+	got := drain(t, ctx, store, written.Bucket, owner, 10)
+	if len(got) != 1 || got[0].ID != written.ID {
+		t.Fatalf("event did not publish after recovery: %+v", got)
+	}
+}
+
+func TestPermanentFailureMovesDirectlyToDeadLetters(t *testing.T) {
+	store, ctx := testStore(t, OutboxConfig{MaxAttempts: 10})
+	const owner = "owner-a"
+
+	written := enqueue(t, ctx, store, "subject-1", `{"n":1}`)
+	behind := enqueue(t, ctx, store, "subject-1", `{"n":2}`)
+	if _, err := store.ClaimBuckets(ctx, owner, time.Minute); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	_, err := store.PublishBucket(ctx, written.Bucket, owner, 10,
+		func(context.Context, outbox.Event) error {
+			return outbox.Permanent(errors.New("invalid event payload"))
+		})
+	if err == nil {
+		t.Fatal("permanent failure did not surface")
+	}
+	if class := outbox.ClassifyPublishError(err); class != outbox.PublishErrorDeadLettered {
+		t.Fatalf("failure class = %q, want dead_lettered Store confirmation", class)
+	}
+	var permanent *outbox.PermanentPublishError
+	if !errors.As(err, &permanent) {
+		t.Fatalf("dead-lettered error lost permanent publisher cause: %v", err)
+	}
+	if got := countRows(t, ctx, store, store.dead); got != 1 {
+		t.Fatalf("dead rows = %d, want 1", got)
+	}
+
+	got := drain(t, ctx, store, written.Bucket, owner, 10)
+	if len(got) != 1 || got[0].ID != behind.ID {
+		t.Fatalf("row behind permanent failure did not unblock: %+v", got)
+	}
+}
+
+func TestDeadLetterInspectionStatsAndIdempotentReplay(t *testing.T) {
+	store, ctx := testStore(t, OutboxConfig{})
+	const owner = "owner-a"
+	if _, err := store.ClaimBuckets(ctx, owner, time.Minute); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	var written []outbox.Event
+	for i := 0; i < 3; i++ {
+		ev := enqueue(t, ctx, store, fmt.Sprintf("subject-%d", i), fmt.Sprintf(`{"n":%d}`, i))
+		dead, err := store.recordPublishFailure(ctx, ev, owner, outbox.Permanent(errors.New("poison payload")))
+		if err != nil {
+			t.Fatalf("dead-letter event %d: %v", i, err)
+		}
+		if !dead {
+			t.Fatalf("event %d was not dead-lettered", i)
+		}
+		written = append(written, ev)
+	}
+
+	page1, err := store.ListDeadLetters(ctx, outbox.DeadLetterListOptions{Limit: 2})
+	if err != nil {
+		t.Fatalf("list first page: %v", err)
+	}
+	if len(page1.Items) != 2 || page1.Next == nil {
+		t.Fatalf("first page = %+v, want two items and cursor", page1)
+	}
+	page2, err := store.ListDeadLetters(ctx, outbox.DeadLetterListOptions{Limit: 2, After: page1.Next})
+	if err != nil {
+		t.Fatalf("list second page: %v", err)
+	}
+	if len(page2.Items) != 1 || page2.Next != nil {
+		t.Fatalf("second page = %+v, want one final item", page2)
+	}
+
+	target := page1.Items[0]
+	got, err := store.GetDeadLetter(ctx, target.Ref())
+	if err != nil {
+		t.Fatalf("get dead letter: %v", err)
+	}
+	if got.ID != target.ID || got.LastError == "" || got.Attempts != 1 {
+		t.Fatalf("dead letter = %+v", got)
+	}
+
+	stats, err := store.OutboxStats(ctx)
+	if err != nil {
+		t.Fatalf("stats before replay: %v", err)
+	}
+	if stats.PendingCount != 0 || stats.DeadCount != 3 || stats.PendingOldestAt != nil || stats.DeadOldestAt == nil {
+		t.Fatalf("stats before replay = %+v", stats)
+	}
+
+	state, err := store.ReplayDeadLetter(ctx, target.Ref())
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if state != outbox.ReplayRequeued {
+		t.Fatalf("replay state = %q, want %q", state, outbox.ReplayRequeued)
+	}
+	state, err = store.ReplayDeadLetter(ctx, target.Ref())
+	if err != nil {
+		t.Fatalf("repeat replay: %v", err)
+	}
+	if state != outbox.ReplayAlreadyPending {
+		t.Fatalf("repeat replay state = %q, want %q", state, outbox.ReplayAlreadyPending)
+	}
+	if attempts := attemptsOf(t, ctx, store, target.Event); attempts != 0 {
+		t.Fatalf("replayed attempts = %d, want 0", attempts)
+	}
+
+	stats, err = store.OutboxStats(ctx)
+	if err != nil {
+		t.Fatalf("stats after replay: %v", err)
+	}
+	if stats.PendingCount != 1 || stats.DeadCount != 2 || stats.PendingOldestAt == nil || stats.DeadOldestAt == nil {
+		t.Fatalf("stats after replay = %+v", stats)
+	}
+
+	published := drain(t, ctx, store, target.Bucket, owner, 10)
+	if len(published) != 1 || published[0].ID != target.ID {
+		t.Fatalf("replayed event was not published: %+v", published)
+	}
+	_, err = store.ReplayDeadLetter(ctx, target.Ref())
+	var deliveredNotFound outbox.ErrDeadLetterNotFound
+	if !errors.As(err, &deliveredNotFound) {
+		t.Fatalf("replay after delivery error = %v, want ErrDeadLetterNotFound", err)
+	}
+
+	missing := outbox.DeadLetterRef{Bucket: written[0].Bucket, CreatedAt: written[0].CreatedAt, ID: uuid.NewString()}
+	_, err = store.GetDeadLetter(ctx, missing)
+	var notFound outbox.ErrDeadLetterNotFound
+	if !errors.As(err, &notFound) {
+		t.Fatalf("get missing error = %v, want ErrDeadLetterNotFound", err)
+	}
+}
+
 func attemptsOf(t *testing.T, ctx context.Context, s *OutboxStore, ev outbox.Event) int32 {
 	t.Helper()
+	id, err := uuid.Parse(ev.ID)
+	if err != nil {
+		t.Fatalf("parse event id: %v", err)
+	}
 
 	row, err := s.db.Query().QueryRow(ctx, s.q(`
 DECLARE $bucket AS Uint8;
+DECLARE $created_at AS Timestamp;
+DECLARE $id AS Uuid;
 
-SELECT attempts FROM %s WHERE bucket = $bucket LIMIT 1;`, s.table),
+SELECT attempts FROM %s
+WHERE bucket = $bucket AND created_at = $created_at AND id = $id;`, s.table),
 		query.WithParameters(ydbsdk.ParamsBuilder().
 			Param("$bucket").Uint8(uint8(ev.Bucket)).
+			Param("$created_at").Timestamp(ev.CreatedAt).
+			Param("$id").Uuid(id).
 			Build()))
 	if err != nil {
 		t.Fatalf("read attempts: %v", err)

@@ -127,8 +127,16 @@ func main() {
 | `Timeout` / `RetryCount` / `RetryWaitMin` / `RetryWaitMax` | транспорт                                                            | 30s / 2 / 0.5s / 5s          |
 | `Logger`                                                   | реализация `integration.Logger`                                      | no-op                        |
 
-Ретраятся только идемпотентные вызовы (GET, а также resolve/активация — платформа
-их дедуплицирует по `executionContextId`+версии) на сетевых ошибках и 502/503/504.
+Ретраятся только идемпотентные вызовы (GET, а также resolve/активация) на сетевых
+ошибках и 502/503/504. Для resolve/reactivate, который вызывающий код может
+повторить после потери ответа, передавайте стабильный durable-ключ через методы
+`ResolveWithOptions` / `ReactivateWithOptions` и
+`integration.ResolveOptions{IdempotencyKey: ...}`. Тот же ключ с тем же запросом
+вернёт сохранённый accepted outcome, а с другим запросом — HTTP 409. Старые
+`Resolve` / `Reactivate` остаются совместимыми и не посылают ключ. В текущем
+keyed-протоколе `variables` должны быть `nil`/пустыми, а ключ — не длиннее 256
+байт: SDK проверяет это до HTTP-запроса, потому что внешнюю запись CRM нельзя
+атомарно объединить с YDB receipt.
 
 ## Возможности
 
@@ -144,6 +152,10 @@ func main() {
   проверяет только владение шагом (`execCtx.StepID` обязателен) и перезаписывает
   позицию субъекта на ветке выхода, как активация триггера. Сохраняйте `StepID`
   вместе с `ID`, если интеграция поддерживает поздние активации.
+- `client.Steps.ResolveWithOptions(...)` и `ReactivateWithOptions(...)` — те же
+  операции с опциональным `idempotencyKey`. Ключ берите из долговечной identity
+  действия/задачи и переиспользуйте на каждом retry; не генерируйте новый ключ
+  на попытку. Для keyed-вызова передавайте `nil`/пустые `vars`.
 - `client.Triggers.Activate(ctx, params)` — активация триггера по внутреннему
   `SubjectID` **или** по внешней идентичности (`IntegrationSubjectID` [+ `Type`]).
 - `client.Triggers.List(ctx, projectID, blockKey)` — список инстансов триггера.
@@ -528,23 +540,61 @@ type Store interface {
 связаны одним хешем, поэтому порядок событий одного ключа держится сквозным.
 
 ```go
-relay := outbox.NewRelay(store, outbox.PublisherFunc(
+relay := outbox.NewRelayWithOptions(store, outbox.PublisherFunc(
     func(ctx context.Context, ev outbox.Event) error {
-        return writer.WriteMessages(ctx, kafka.Message{
+        err := writer.WriteMessages(ctx, kafka.Message{
             Topic: topic,
             Key:   []byte(ev.PartitionKey),
             Value: ev.Payload,
         })
+        switch {
+        case err == nil:
+            return nil
+        case isSharedBrokerFailure(err):
+            // Network, broker/auth outage, 429 and similar dependency-wide
+            // failures do not consume this event's poison-message budget.
+            return outbox.Transient(err, retryAfter(err))
+        case isEventSpecificRejection(err):
+            // Retrying the same payload cannot help; unblock the bucket by
+            // moving precisely this row to dead letters.
+            return outbox.Permanent(err)
+        default:
+            // Untyped failures retain the Store's bounded legacy budget.
+            return err
+        }
     }),
     outbox.Config{Logger: zaplog.New(log)},
+    outbox.WithObserver(metrics),
 )
 go relay.Run(ctx)
 ```
+
+После нетерминальной ошибки relay включает для конкретного бакета exponential
+full-jitter backoff (по умолчанию от 500 ms до 30 s). Положительный
+`RetryAfter` у `outbox.Transient` имеет приоритет. Остальные бакеты продолжают
+работать. Это одновременно не даёт недоступному брокеру получать запрос на
+каждом 200-ms poll и не превращает общую аварию в сотни poison-событий.
+
+`outbox.Observer` — независимый от Prometheus/OpenTelemetry metrics seam. Он
+отдаёт результаты publish без event ID/payload/partition key и bucket backoff;
+из него строятся counters по `ErrorClass`, latency histogram и backoff gauges.
+Observer вызывается одним bounded async worker: медленный callback не блокирует
+publish, переполненная очередь дропает observations, panic изолируется. Счётчики
+дропов и panic доступны через `Relay.DroppedObservations()` и
+`Relay.ObserverPanics()`. Размер очереди меняется через
+`outbox.WithObserverQueue`; backoff — через `outbox.WithRetryBackoff`. Новые
+настройки намеренно не добавлены полями в `outbox.Config`, чтобы minor-релиз не
+сломал существующие unkeyed literals.
 
 Готовый `Store` на YDB — в подмодуле [`ydb`](ydb/README.md) вместе с DDL схемы.
 На PostgreSQL два метода пишутся своим SQL: `ClaimBuckets` — условный `UPDATE`
 по таблице аренд, `PublishBucket` — чтение головы бакета с удалением строки
 после успешной публикации.
+
+Operator-функции вынесены в отдельный optional-интерфейс
+`outbox.DeadLetterStore`: keyset-list, точечный get, идемпотентный targeted
+replay и snapshot `pending/dead count + oldest timestamp`. Поэтому добавление
+этих возможностей не ломает существующие реализации горячего `Store`.
 
 `outbox.BucketOf` обязан оставаться неизменным: бакет входит в первичный ключ, и
 смена хеша оставит уже записанные строки в бакетах, которые никто не опрашивает.

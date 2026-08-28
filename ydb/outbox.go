@@ -2,7 +2,9 @@ package ydb
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/outbox"
@@ -16,9 +18,18 @@ import (
 // it empty. The lease and dead-letter tables derive from it.
 const DefaultOutboxTable = "platform_outbox"
 
-// DefaultMaxAttempts is how many times a row is published before it is parked
-// in the dead-letter table.
+// DefaultMaxAttempts is how many unclassified, event-specific publisher
+// failures a row gets before it is parked in the dead-letter table. Explicit
+// transient failures never consume this budget; explicit permanent failures
+// are parked immediately.
 const DefaultMaxAttempts = 10
+
+const (
+	defaultDeadLetterPageSize = 100
+	maxDeadLetterPageSize     = 1000
+)
+
+var errOutboxLeaseLost = errors.New("ydb: outbox bucket lease lost")
 
 // OutboxConfig describes where a service's outbox lives.
 type OutboxConfig struct {
@@ -37,8 +48,11 @@ type OutboxConfig struct {
 	// Zero means outbox.DefaultBucketCount.
 	BucketCount int
 
-	// MaxAttempts caps how often one row is retried before it moves to the
-	// dead-letter table. Zero means DefaultMaxAttempts.
+	// MaxAttempts caps unclassified publish failures before a row moves to the
+	// dead-letter table. Zero means DefaultMaxAttempts. A publisher must wrap a
+	// broker-wide outage with outbox.Transient so it updates last_error without
+	// consuming this poison-message budget. outbox.Permanent moves an
+	// event-specific rejection to dead letters immediately.
 	//
 	// Parking a poison row is not optional here the way it was on PostgreSQL.
 	// There, a status column with a partial index hid the row from the relay's
@@ -60,6 +74,8 @@ type OutboxStore struct {
 	bucketCount int
 	maxAttempts int
 }
+
+var _ outbox.DeadLetterStore = (*OutboxStore)(nil)
 
 // NewOutboxStore builds a store over an already-open driver.
 func NewOutboxStore(db *ydbsdk.Driver, cfg OutboxConfig) *OutboxStore {
@@ -242,9 +258,25 @@ func (s *OutboxStore) PublishBucket(
 
 	published := 0
 	for _, event := range events {
+		held, err := s.leaseHeld(ctx, event.Bucket, owner)
+		if err != nil {
+			return published, err
+		}
+		if !held {
+			return published, outbox.Transient(
+				fmt.Errorf("%w: bucket %d owner %s", errOutboxLeaseLost, event.Bucket, owner), 0)
+		}
+
 		if publishErr := publish(ctx, event); publishErr != nil {
-			if err := s.recordPublishFailure(ctx, event, publishErr); err != nil {
+			deadLettered, err := s.recordPublishFailure(ctx, event, owner, publishErr)
+			if err != nil {
+				if errors.Is(err, errOutboxLeaseLost) {
+					return published, outbox.Transient(err, 0)
+				}
 				return published, err
+			}
+			if deadLettered {
+				publishErr = &outbox.DeadLetteredPublishError{EventID: event.ID, Err: publishErr}
 			}
 			// Stop at the first failure. The rows behind it are in the same
 			// bucket and may share a partition key, so skipping ahead would
@@ -252,7 +284,10 @@ func (s *OutboxStore) PublishBucket(
 			return published, fmt.Errorf("ydb: publish outbox event %s: %w", event.ID, publishErr)
 		}
 
-		if err := s.deleteEvent(ctx, event); err != nil {
+		if err := s.deleteEvent(ctx, event, owner); err != nil {
+			if errors.Is(err, errOutboxLeaseLost) {
+				return published, outbox.Transient(err, 0)
+			}
 			return published, err
 		}
 		published++
@@ -319,6 +354,59 @@ LIMIT $limit;`, s.table),
 	return events, nil
 }
 
+func (s *OutboxStore) leaseHeld(ctx context.Context, bucket int, owner string) (bool, error) {
+	row, err := s.db.Query().QueryRow(ctx, s.q(`
+DECLARE $bucket AS Uint8;
+
+SELECT locked_by, locked_until FROM %s WHERE bucket = $bucket;`, s.leases),
+		query.WithParameters(ydbsdk.ParamsBuilder().
+			Param("$bucket").Uint8(uint8(bucket)).
+			Build()))
+	if err != nil {
+		if IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("ydb: check outbox bucket %d lease: %w", bucket, err)
+	}
+	var (
+		lockedBy    string
+		lockedUntil time.Time
+	)
+	if err := row.Scan(&lockedBy, &lockedUntil); err != nil {
+		return false, fmt.Errorf("ydb: scan outbox bucket %d lease: %w", bucket, err)
+	}
+	return lockedBy == owner && lockedUntil.After(Now()), nil
+}
+
+func (s *OutboxStore) leaseHeldTx(
+	ctx context.Context,
+	tx query.TxActor,
+	bucket int,
+	owner string,
+) (bool, error) {
+	row, err := tx.QueryRow(ctx, s.q(`
+DECLARE $bucket AS Uint8;
+
+SELECT locked_by, locked_until FROM %s WHERE bucket = $bucket;`, s.leases),
+		query.WithParameters(ydbsdk.ParamsBuilder().
+			Param("$bucket").Uint8(uint8(bucket)).
+			Build()))
+	if err != nil {
+		if IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	var (
+		lockedBy    string
+		lockedUntil time.Time
+	)
+	if err := row.Scan(&lockedBy, &lockedUntil); err != nil {
+		return false, err
+	}
+	return lockedBy == owner && lockedUntil.After(Now()), nil
+}
+
 func scanEvent(row query.Row) (outbox.Event, error) {
 	var (
 		event      outbox.Event
@@ -340,38 +428,63 @@ func scanEvent(row query.Row) (outbox.Event, error) {
 	return event, nil
 }
 
-func (s *OutboxStore) deleteEvent(ctx context.Context, event outbox.Event) error {
-	id, err := uuid.Parse(event.ID)
-	if err != nil {
-		return fmt.Errorf("ydb: outbox event id: %w", err)
-	}
-
-	err = s.db.Query().Exec(ctx, s.q(`
-DECLARE $bucket AS Uint8;
-DECLARE $created_at AS Timestamp;
-DECLARE $id AS Uuid;
-
-DELETE FROM %s WHERE bucket = $bucket AND created_at = $created_at AND id = $id;`, s.table),
-		query.WithParameters(ydbsdk.ParamsBuilder().
-			Param("$bucket").Uint8(uint8(event.Bucket)).
-			Param("$created_at").Timestamp(event.CreatedAt).
-			Param("$id").Uuid(id).
-			Build()))
-	if err != nil {
-		return fmt.Errorf("ydb: delete outbox event %s: %w", event.ID, err)
-	}
-	return nil
-}
-
-// recordPublishFailure counts the attempt and moves the row to the dead-letter
-// table once it has exhausted MaxAttempts.
-func (s *OutboxStore) recordPublishFailure(ctx context.Context, event outbox.Event, publishErr error) error {
+func (s *OutboxStore) deleteEvent(ctx context.Context, event outbox.Event, owner string) error {
 	id, err := uuid.Parse(event.ID)
 	if err != nil {
 		return fmt.Errorf("ydb: outbox event id: %w", err)
 	}
 
 	err = s.db.Query().DoTx(ctx, func(ctx context.Context, tx query.TxActor) error {
+		held, err := s.leaseHeldTx(ctx, tx, event.Bucket, owner)
+		if err != nil {
+			return err
+		}
+		if !held {
+			return errOutboxLeaseLost
+		}
+		return tx.Exec(ctx, s.q(`
+DECLARE $bucket AS Uint8;
+DECLARE $created_at AS Timestamp;
+DECLARE $id AS Uuid;
+
+DELETE FROM %s WHERE bucket = $bucket AND created_at = $created_at AND id = $id;`, s.table),
+			query.WithParameters(ydbsdk.ParamsBuilder().
+				Param("$bucket").Uint8(uint8(event.Bucket)).
+				Param("$created_at").Timestamp(event.CreatedAt).
+				Param("$id").Uuid(id).
+				Build()))
+	})
+	if err != nil {
+		return fmt.Errorf("ydb: delete outbox event %s: %w", event.ID, err)
+	}
+	return nil
+}
+
+// recordPublishFailure applies the failure class atomically. Shared transient
+// outages update last_error without consuming MaxAttempts. Permanent failures
+// move directly to dead letters. Untyped failures keep the legacy bounded
+// budget so existing publishers cannot block a bucket forever.
+func (s *OutboxStore) recordPublishFailure(
+	ctx context.Context,
+	event outbox.Event,
+	owner string,
+	publishErr error,
+) (bool, error) {
+	id, err := uuid.Parse(event.ID)
+	if err != nil {
+		return false, fmt.Errorf("ydb: outbox event id: %w", err)
+	}
+
+	deadLettered := false
+	err = s.db.Query().DoTx(ctx, func(ctx context.Context, tx query.TxActor) error {
+		deadLettered = false
+		held, err := s.leaseHeldTx(ctx, tx, event.Bucket, owner)
+		if err != nil {
+			return err
+		}
+		if !held {
+			return errOutboxLeaseLost
+		}
 		row, err := tx.QueryRow(ctx, s.q(`
 DECLARE $bucket AS Uint8;
 DECLARE $created_at AS Timestamp;
@@ -403,10 +516,28 @@ WHERE bucket = $bucket AND created_at = $created_at AND id = $id;`, s.table),
 			return err
 		}
 
-		attempts++
-		lastError := publishErr.Error()
+		class := outbox.ClassifyPublishError(publishErr)
+		lastError := strings.ToValidUTF8(publishErr.Error(), "")
 
-		if int(attempts) < s.maxAttempts {
+		if class == outbox.PublishErrorTransient {
+			return tx.Exec(ctx, s.q(`
+DECLARE $bucket AS Uint8;
+DECLARE $created_at AS Timestamp;
+DECLARE $id AS Uuid;
+DECLARE $last_error AS Utf8;
+
+UPDATE %s SET last_error = $last_error
+WHERE bucket = $bucket AND created_at = $created_at AND id = $id;`, s.table),
+				query.WithParameters(ydbsdk.ParamsBuilder().
+					Param("$bucket").Uint8(uint8(event.Bucket)).
+					Param("$created_at").Timestamp(event.CreatedAt).
+					Param("$id").Uuid(id).
+					Param("$last_error").Text(lastError).
+					Build()))
+		}
+
+		attempts++
+		if class != outbox.PublishErrorPermanent && int(attempts) < s.maxAttempts {
 			return tx.Exec(ctx, s.q(`
 DECLARE $bucket AS Uint8;
 DECLARE $created_at AS Timestamp;
@@ -457,7 +588,7 @@ UPSERT INTO %s (
 			return err
 		}
 
-		return tx.Exec(ctx, s.q(`
+		if err := tx.Exec(ctx, s.q(`
 DECLARE $bucket AS Uint8;
 DECLARE $created_at AS Timestamp;
 DECLARE $id AS Uuid;
@@ -467,12 +598,337 @@ DELETE FROM %s WHERE bucket = $bucket AND created_at = $created_at AND id = $id;
 				Param("$bucket").Uint8(uint8(event.Bucket)).
 				Param("$created_at").Timestamp(event.CreatedAt).
 				Param("$id").Uuid(id).
-				Build()))
+				Build())); err != nil {
+			return err
+		}
+		deadLettered = true
+		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("ydb: record outbox failure for %s: %w", event.ID, err)
+		return false, fmt.Errorf("ydb: record outbox failure for %s: %w", event.ID, err)
 	}
-	return nil
+	return deadLettered, nil
+}
+
+// ListDeadLetters returns dead rows in stable primary-key order. It is an
+// operator path, not part of the relay hot loop; no extra index or schema
+// column is required.
+func (s *OutboxStore) ListDeadLetters(ctx context.Context, opts outbox.DeadLetterListOptions) (outbox.DeadLetterPage, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = defaultDeadLetterPageSize
+	}
+	if limit > maxDeadLetterPageSize {
+		limit = maxDeadLetterPageSize
+	}
+
+	var (
+		rs  query.ResultSet
+		err error
+	)
+	if opts.After == nil {
+		rs, err = s.db.Query().QueryResultSet(ctx, s.q(`
+DECLARE $limit AS Uint64;
+
+SELECT bucket, created_at, id, partition_key, topic, payload,
+       attempts, last_error, failed_at
+FROM %s
+ORDER BY bucket, created_at, id
+LIMIT $limit;`, s.dead),
+			query.WithParameters(ydbsdk.ParamsBuilder().
+				Param("$limit").Uint64(uint64(limit+1)).
+				Build()))
+	} else {
+		id, createdAt, validateErr := s.validateDeadLetterRef(*opts.After)
+		if validateErr != nil {
+			return outbox.DeadLetterPage{}, validateErr
+		}
+		rs, err = s.db.Query().QueryResultSet(ctx, s.q(`
+DECLARE $after_bucket AS Uint8;
+DECLARE $after_created_at AS Timestamp;
+DECLARE $after_id AS Uuid;
+DECLARE $limit AS Uint64;
+
+SELECT bucket, created_at, id, partition_key, topic, payload,
+       attempts, last_error, failed_at
+FROM %s
+WHERE (bucket, created_at, id) > ($after_bucket, $after_created_at, $after_id)
+ORDER BY bucket, created_at, id
+LIMIT $limit;`, s.dead),
+			query.WithParameters(ydbsdk.ParamsBuilder().
+				Param("$after_bucket").Uint8(uint8(opts.After.Bucket)).
+				Param("$after_created_at").Timestamp(createdAt).
+				Param("$after_id").Uuid(id).
+				Param("$limit").Uint64(uint64(limit+1)).
+				Build()))
+	}
+	if err != nil {
+		return outbox.DeadLetterPage{}, fmt.Errorf("ydb: list outbox dead letters: %w", err)
+	}
+
+	items, err := collect(ctx, rs, scanDeadLetter)
+	if err != nil {
+		return outbox.DeadLetterPage{}, fmt.Errorf("ydb: scan outbox dead letters: %w", err)
+	}
+
+	page := outbox.DeadLetterPage{Items: items}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		next := page.Items[len(page.Items)-1].Ref()
+		page.Next = &next
+	}
+	return page, nil
+}
+
+// GetDeadLetter reads one exact dead row without scanning by UUID.
+func (s *OutboxStore) GetDeadLetter(ctx context.Context, ref outbox.DeadLetterRef) (outbox.DeadLetter, error) {
+	id, createdAt, err := s.validateDeadLetterRef(ref)
+	if err != nil {
+		return outbox.DeadLetter{}, err
+	}
+
+	row, err := s.db.Query().QueryRow(ctx, s.q(`
+DECLARE $bucket AS Uint8;
+DECLARE $created_at AS Timestamp;
+DECLARE $id AS Uuid;
+
+SELECT bucket, created_at, id, partition_key, topic, payload,
+       attempts, last_error, failed_at
+FROM %s
+WHERE bucket = $bucket AND created_at = $created_at AND id = $id;`, s.dead),
+		query.WithParameters(ydbsdk.ParamsBuilder().
+			Param("$bucket").Uint8(uint8(ref.Bucket)).
+			Param("$created_at").Timestamp(createdAt).
+			Param("$id").Uuid(id).
+			Build()))
+	if err != nil {
+		if IsNotFound(err) {
+			return outbox.DeadLetter{}, outbox.ErrDeadLetterNotFound{Ref: ref}
+		}
+		return outbox.DeadLetter{}, fmt.Errorf("ydb: get outbox dead letter %s: %w", ref.ID, err)
+	}
+
+	letter, err := scanDeadLetter(row)
+	if err != nil {
+		return outbox.DeadLetter{}, fmt.Errorf("ydb: scan outbox dead letter %s: %w", ref.ID, err)
+	}
+	return letter, nil
+}
+
+// ReplayDeadLetter atomically restores one exact dead row to pending with a
+// clean attempt budget. Repeating while the row remains pending returns
+// ReplayAlreadyPending; after delivery it returns ErrDeadLetterNotFound and
+// never recreates a duplicate. If both copies exist, neither is modified.
+func (s *OutboxStore) ReplayDeadLetter(ctx context.Context, ref outbox.DeadLetterRef) (outbox.ReplayState, error) {
+	id, createdAt, err := s.validateDeadLetterRef(ref)
+	if err != nil {
+		return "", err
+	}
+
+	var state outbox.ReplayState
+	err = s.db.Query().DoTx(ctx, func(ctx context.Context, tx query.TxActor) error {
+		state = ""
+
+		pending, err := s.eventExistsTx(ctx, tx, s.table, ref.Bucket, createdAt, id)
+		if err != nil {
+			return err
+		}
+
+		row, err := tx.QueryRow(ctx, s.q(`
+DECLARE $bucket AS Uint8;
+DECLARE $created_at AS Timestamp;
+DECLARE $id AS Uuid;
+
+SELECT bucket, created_at, id, partition_key, topic, payload,
+       attempts, last_error, failed_at
+FROM %s
+WHERE bucket = $bucket AND created_at = $created_at AND id = $id;`, s.dead),
+			query.WithParameters(ydbsdk.ParamsBuilder().
+				Param("$bucket").Uint8(uint8(ref.Bucket)).
+				Param("$created_at").Timestamp(createdAt).
+				Param("$id").Uuid(id).
+				Build()))
+		if err != nil {
+			if IsNotFound(err) {
+				if pending {
+					state = outbox.ReplayAlreadyPending
+					return nil
+				}
+				return outbox.ErrDeadLetterNotFound{Ref: ref}
+			}
+			return err
+		}
+
+		letter, err := scanDeadLetter(row)
+		if err != nil {
+			return err
+		}
+		if pending {
+			return outbox.ErrDeadLetterReplayConflict{Ref: ref}
+		}
+
+		if err := tx.Exec(ctx, s.q(`
+DECLARE $bucket AS Uint8;
+DECLARE $created_at AS Timestamp;
+DECLARE $id AS Uuid;
+DECLARE $partition_key AS Utf8;
+DECLARE $topic AS Optional<Utf8>;
+DECLARE $payload AS Json;
+
+UPSERT INTO %s (
+    bucket, created_at, id, partition_key, topic, payload, attempts
+) VALUES (
+    $bucket, $created_at, $id, $partition_key, $topic, $payload, 0
+);`, s.table),
+			query.WithParameters(ydbsdk.ParamsBuilder().
+				Param("$bucket").Uint8(uint8(letter.Bucket)).
+				Param("$created_at").Timestamp(letter.CreatedAt).
+				Param("$id").Uuid(id).
+				Param("$partition_key").Text(letter.PartitionKey).
+				Param("$topic").BeginOptional().Text(optionalText(letter.Topic)).EndOptional().
+				Param("$payload").JSON(string(letter.Payload)).
+				Build())); err != nil {
+			return err
+		}
+
+		if err := tx.Exec(ctx, s.q(`
+DECLARE $bucket AS Uint8;
+DECLARE $created_at AS Timestamp;
+DECLARE $id AS Uuid;
+
+DELETE FROM %s WHERE bucket = $bucket AND created_at = $created_at AND id = $id;`, s.dead),
+			query.WithParameters(ydbsdk.ParamsBuilder().
+				Param("$bucket").Uint8(uint8(ref.Bucket)).
+				Param("$created_at").Timestamp(createdAt).
+				Param("$id").Uuid(id).
+				Build())); err != nil {
+			return err
+		}
+
+		state = outbox.ReplayRequeued
+		return nil
+	})
+	if err != nil {
+		var notFound outbox.ErrDeadLetterNotFound
+		var conflict outbox.ErrDeadLetterReplayConflict
+		switch {
+		case errors.As(err, &notFound), errors.As(err, &conflict):
+			return "", err
+		default:
+			return "", fmt.Errorf("ydb: replay outbox dead letter %s: %w", ref.ID, err)
+		}
+	}
+	return state, nil
+}
+
+// OutboxStats returns pending/dead counts and their oldest timestamps. It is
+// intended for a low-frequency metrics collector, not for every relay tick.
+func (s *OutboxStore) OutboxStats(ctx context.Context) (outbox.OutboxStats, error) {
+	pendingCount, pendingOldest, err := s.tableStats(ctx, s.table, "created_at")
+	if err != nil {
+		return outbox.OutboxStats{}, fmt.Errorf("ydb: read pending outbox stats: %w", err)
+	}
+	deadCount, deadOldest, err := s.tableStats(ctx, s.dead, "failed_at")
+	if err != nil {
+		return outbox.OutboxStats{}, fmt.Errorf("ydb: read dead outbox stats: %w", err)
+	}
+	return outbox.OutboxStats{
+		PendingCount:    pendingCount,
+		PendingOldestAt: pendingOldest,
+		DeadCount:       deadCount,
+		DeadOldestAt:    deadOldest,
+	}, nil
+}
+
+func (s *OutboxStore) validateDeadLetterRef(ref outbox.DeadLetterRef) (uuid.UUID, time.Time, error) {
+	if ref.Bucket < 0 || ref.Bucket >= s.bucketCount {
+		return uuid.Nil, time.Time{}, fmt.Errorf("ydb: outbox dead letter bucket %d is outside [0,%d)", ref.Bucket, s.bucketCount)
+	}
+	if ref.CreatedAt.IsZero() {
+		return uuid.Nil, time.Time{}, fmt.Errorf("ydb: outbox dead letter created_at is required")
+	}
+	id, err := uuid.Parse(ref.ID)
+	if err != nil {
+		return uuid.Nil, time.Time{}, fmt.Errorf("ydb: outbox dead letter id: %w", err)
+	}
+	return id, ref.CreatedAt.UTC().Truncate(time.Microsecond), nil
+}
+
+func (s *OutboxStore) eventExistsTx(
+	ctx context.Context,
+	tx query.TxActor,
+	table string,
+	bucket int,
+	createdAt time.Time,
+	id uuid.UUID,
+) (bool, error) {
+	row, err := tx.QueryRow(ctx, s.q(`
+DECLARE $bucket AS Uint8;
+DECLARE $created_at AS Timestamp;
+DECLARE $id AS Uuid;
+
+SELECT id FROM %s
+WHERE bucket = $bucket AND created_at = $created_at AND id = $id;`, table),
+		query.WithParameters(ydbsdk.ParamsBuilder().
+			Param("$bucket").Uint8(uint8(bucket)).
+			Param("$created_at").Timestamp(createdAt).
+			Param("$id").Uuid(id).
+			Build()))
+	if err != nil {
+		if IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	var found uuid.UUID
+	if err := row.Scan(&found); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *OutboxStore) tableStats(ctx context.Context, table, oldestColumn string) (uint64, *time.Time, error) {
+	row, err := s.db.Query().QueryRow(ctx, s.q(`
+SELECT COUNT(*), MIN(%s) FROM %s;`, oldestColumn, table))
+	if err != nil {
+		return 0, nil, err
+	}
+	var (
+		count  uint64
+		oldest *time.Time
+	)
+	if err := row.Scan(&count, &oldest); err != nil {
+		return 0, nil, err
+	}
+	return count, oldest, nil
+}
+
+func scanDeadLetter(row query.Row) (outbox.DeadLetter, error) {
+	var (
+		letter     outbox.DeadLetter
+		bucketByte uint8
+		id         uuid.UUID
+		topic      *string
+		payload    []byte
+		attempts   int32
+		lastError  *string
+	)
+	if err := row.Scan(&bucketByte, &letter.CreatedAt, &id,
+		&letter.PartitionKey, &topic, &payload,
+		&attempts, &lastError, &letter.FailedAt); err != nil {
+		return outbox.DeadLetter{}, err
+	}
+	letter.Bucket = int(bucketByte)
+	letter.ID = id.String()
+	letter.Payload = payload
+	letter.Attempts = int(attempts)
+	if topic != nil {
+		letter.Topic = *topic
+	}
+	if lastError != nil {
+		letter.LastError = *lastError
+	}
+	return letter, nil
 }
 
 // optionalText renders an empty string as an absent value, so a column that

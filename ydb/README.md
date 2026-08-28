@@ -110,6 +110,22 @@ CREATE TABLE platform_outbox_dead (
 секунду. По той же причине строка, исчерпавшая попытки, переезжает в
 `_dead`, а не остаётся на месте: иначе она блокировала бы свой бакет навсегда.
 
+Семантика publish-ошибок:
+
+- `outbox.Transient(err, retryAfter)` обновляет `last_error`, но **не**
+  увеличивает `attempts`. Так маркируются network/broker/auth outage, 429 и
+  другие общие отказы зависимости;
+- `outbox.Permanent(err)` сразу атомарно переносит конкретную event в `_dead`;
+  после успешного move Store возвращает `DeadLetteredPublishError`, потому что
+  только Store может подтвердить отсутствие pending row;
+- немаркированная ошибка сохраняет совместимость со старыми publisher-ами:
+  увеличивает `attempts` и попадает в `_dead` после `MaxAttempts`;
+- исчерпавшая budget ошибка возвращается как `DeadLetteredPublishError`, чтобы
+  relay не включал backoff для уже удалённой из pending строки.
+
+Это изменение использует существующие `attempts`, `last_error`, `failed_at` и
+не требует миграции схемы.
+
 ### Запись
 
 Событие пишется **в транзакции того изменения, которое оно описывает** — в этом
@@ -159,6 +175,63 @@ go relay.Run(ctx)
 инстансы не соревнуются за отдельные строки, а делят бакеты между собой. Один
 инстанс просто забирает все. Бакеты умершего инстанса возвращаются в оборот,
 когда истекает его аренда.
+
+Lease renewal работает в отдельной goroutine и не ждёт завершения broker
+publish. Relay держит локальный fencing deadline: если успешного renew не было
+до TTL, контекст in-flight publish отменяется и бакет исчезает из owned.
+`OutboxStore` дополнительно сверяет owner/`locked_until` перед каждым publish и
+в той же короткой транзакции перед delete/failure update. Поэтому старый owner
+после handoff не продолжает оставшуюся часть batch и не удаляет строку нового
+владельца. Окно at-least-once для уже ушедшего во внешний broker сообщения
+остаётся принципиально — consumer по-прежнему обязан быть идемпотентным.
+
+### Проверка и targeted replay dead letters
+
+`OutboxStore` дополнительно реализует optional-интерфейс
+`outbox.DeadLetterStore`. Он не добавлен в горячий `outbox.Store`, поэтому
+существующие PostgreSQL-сторы остаются совместимы.
+
+```go
+page, err := store.ListDeadLetters(ctx, outbox.DeadLetterListOptions{Limit: 100})
+if err != nil {
+    return err
+}
+for _, letter := range page.Items {
+    log.Info("outbox dead letter",
+        zap.String("eventId", letter.ID),
+        zap.String("topic", letter.Topic),
+        zap.Int("attempts", letter.Attempts),
+        zap.String("lastError", letter.LastError),
+        zap.Time("failedAt", letter.FailedAt))
+}
+
+state, err := store.ReplayDeadLetter(ctx, page.Items[0].Ref())
+// state == outbox.ReplayRequeued on the first call;
+// state == outbox.ReplayAlreadyPending only while that row is still pending.
+```
+
+List идёт keyset-пагинацией в порядке существующего PK
+`(bucket, created_at, id)`. `GetDeadLetter` и `ReplayDeadLetter` требуют все три
+поля ключа: точечный операторский запрос не превращается в full scan по UUID.
+Replay в одной YDB-транзакции:
+
+1. проверяет, что тот же ключ не существует одновременно в pending и dead;
+2. переносит исходные topic/payload/partition key в pending;
+3. сбрасывает `attempts` в 0 и `last_error` в NULL;
+4. удаляет dead row.
+
+Если команда была успешно выполнена, её повтор возвращает `already_pending`,
+пока строка ещё pending. После её успешной публикации обеих строк уже нет, и
+повтор возвращает typed `ErrDeadLetterNotFound` — новая копия события не
+создаётся. Запомнить «этот replay когда-то выполнялся» после delivery без
+отдельного audit/tombstone невозможно; добавлять DDL ради этого SDK не стал.
+Если ключ одновременно найден в обеих таблицах, возвращается typed
+`ErrDeadLetterReplayConflict`, и ни одна строка не перезаписывается.
+`OutboxStats` отдаёт `pending_count`, `pending_oldest_at`, `dead_count` и
+`dead_oldest_at`; это операторский full aggregate, его следует собирать с
+невысокой частотой, а не на каждом relay tick. Audit log с operator identity и
+причиной replay пишет вызывающий admin CLI/API — SDK не знает identity
+оператора.
 
 ## Тесты
 

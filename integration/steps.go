@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/httpclient"
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
@@ -13,6 +14,8 @@ import (
 // resolvePath is relative to the configured ExecutionURL, which already carries
 // the gateway's "/api/execution" prefix.
 const resolvePath = "/integrations/resolve"
+
+const maxResolveIdempotencyKeyBytes = 256
 
 // StepsClient resolves parked integrationAction steps. All calls are signed with
 // the integration's private key.
@@ -29,6 +32,16 @@ type resolveBody struct {
 	Variables          map[string]any `json:"variables,omitempty"`
 	Mode               string         `json:"mode,omitempty"`
 	StepID             string         `json:"stepId,omitempty"`
+	IdempotencyKey     string         `json:"idempotencyKey,omitempty"`
+}
+
+// ResolveOptions controls optional delivery guarantees for ResolveWithOptions
+// and ReactivateWithOptions. IdempotencyKey is scoped by the platform to this
+// integration and execution context. Reusing it with the same request replays
+// the original accepted outcome; reusing it with different request data is a
+// conflict.
+type ResolveOptions struct {
+	IdempotencyKey string
 }
 
 // Resolve advances a parked integrationAction context through the chosen output.
@@ -43,11 +56,23 @@ type resolveBody struct {
 // retried on transient failures. The request targets the configured ExecutionURL
 // + the standard resolve path.
 func (c *StepsClient) Resolve(ctx context.Context, ec ExecutionContext, output string, variables map[string]any) error {
+	return c.ResolveWithOptions(ctx, ec, output, variables, ResolveOptions{})
+}
+
+// ResolveWithOptions is Resolve with an optional durable idempotency key. Use a
+// stable key from the caller's durable interaction/job identity; never generate
+// a fresh key for each retry. The current keyed protocol does not support
+// variables: pass nil or an empty map so the platform can commit every protected
+// side effect in one transaction.
+func (c *StepsClient) ResolveWithOptions(ctx context.Context, ec ExecutionContext, output string, variables map[string]any, options ResolveOptions) error {
 	if ec.ID == "" {
 		return fmt.Errorf("integration: Resolve requires ExecutionContext.ID")
 	}
 	if output == "" {
 		return fmt.Errorf("integration: Resolve requires output")
+	}
+	if err := validateResolveOptions("Resolve", variables, options); err != nil {
+		return err
 	}
 
 	body, err := json.Marshal(resolveBody{
@@ -55,6 +80,7 @@ func (c *StepsClient) Resolve(ctx context.Context, ec ExecutionContext, output s
 		ContextVersion:     ec.Version,
 		Output:             output,
 		Variables:          variables,
+		IdempotencyKey:     options.IdempotencyKey,
 	})
 	if err != nil {
 		return fmt.Errorf("integration: marshal resolve: %w", err)
@@ -80,6 +106,12 @@ func (c *StepsClient) Resolve(ctx context.Context, ec ExecutionContext, output s
 // The platform returns 202 and applies the re-route asynchronously. An output
 // with no wired edge is a no-op on the platform side.
 func (c *StepsClient) Reactivate(ctx context.Context, ec ExecutionContext, output string, variables map[string]any) error {
+	return c.ReactivateWithOptions(ctx, ec, output, variables, ResolveOptions{})
+}
+
+// ReactivateWithOptions is Reactivate with the same optional durable
+// idempotency semantics as ResolveWithOptions.
+func (c *StepsClient) ReactivateWithOptions(ctx context.Context, ec ExecutionContext, output string, variables map[string]any, options ResolveOptions) error {
 	if ec.ID == "" {
 		return fmt.Errorf("integration: Reactivate requires ExecutionContext.ID")
 	}
@@ -89,6 +121,9 @@ func (c *StepsClient) Reactivate(ctx context.Context, ec ExecutionContext, outpu
 	if output == "" {
 		return fmt.Errorf("integration: Reactivate requires output")
 	}
+	if err := validateResolveOptions("Reactivate", variables, options); err != nil {
+		return err
+	}
 
 	body, err := json.Marshal(resolveBody{
 		ExecutionContextID: ec.ID,
@@ -97,6 +132,7 @@ func (c *StepsClient) Reactivate(ctx context.Context, ec ExecutionContext, outpu
 		Variables:          variables,
 		Mode:               "reactivate",
 		StepID:             ec.StepID,
+		IdempotencyKey:     options.IdempotencyKey,
 	})
 	if err != nil {
 		return fmt.Errorf("integration: marshal reactivate: %w", err)
@@ -108,4 +144,20 @@ func (c *StepsClient) Reactivate(ctx context.Context, ec ExecutionContext, outpu
 	}
 	_, err = c.http.Do(ctx, req)
 	return err
+}
+
+func validateResolveOptions(operation string, variables map[string]any, options ResolveOptions) error {
+	if options.IdempotencyKey == "" {
+		return nil
+	}
+	if strings.TrimSpace(options.IdempotencyKey) == "" {
+		return fmt.Errorf("integration: %s idempotency key must not be blank", operation)
+	}
+	if len(options.IdempotencyKey) > maxResolveIdempotencyKeyBytes {
+		return fmt.Errorf("integration: %s idempotency key must be at most %d bytes", operation, maxResolveIdempotencyKeyBytes)
+	}
+	if len(variables) != 0 {
+		return fmt.Errorf("integration: %s variables are not supported with an idempotency key", operation)
+	}
+	return nil
 }
