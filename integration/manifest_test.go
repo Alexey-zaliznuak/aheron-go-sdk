@@ -418,3 +418,27 @@ func TestManifestBlockKeys(t *testing.T) {
 		t.Fatalf("BlockKeys() = %v", got)
 	}
 }
+
+func TestManifestFavoriteByDefault(t *testing.T) {
+	for _, favorite := range []bool{false, true} {
+		body, err := (Manifest{Blocks: []Block{{Key: "send-message", Name: "Send", Kind: KindAction, FavoriteByDefault: favorite}}}).resolve("https://example.com")
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded struct {
+			Blocks []struct {
+				FavoriteByDefault bool `json:"favoriteByDefault"`
+			} `json:"blocks"`
+		}
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if len(decoded.Blocks) != 1 || decoded.Blocks[0].FavoriteByDefault != favorite {
+			t.Fatalf("flag lost: %s", raw)
+		}
+	}
+}

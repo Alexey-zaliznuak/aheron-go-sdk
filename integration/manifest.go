@@ -64,6 +64,8 @@ func RemoteVariableValues() VariableValueSource {
 type Block struct {
 	// Key is the block's slug, matching ^[a-zA-Z0-9_-]+$ (e.g. "create-row").
 	Key string
+	// FavoriteByDefault appends this block to each member's personal project favorites on installation.
+	FavoriteByDefault bool
 	// Kind selects how the platform executes and renders the block.
 	Kind Kind
 	// Name is the human-readable label shown in the scheme editor.
@@ -195,6 +197,7 @@ type iconBody struct {
 // blockBody is the wire shape of one resolved block declaration. Field names
 // match the platform's block declaration payload.
 type blockBody struct {
+	FavoriteByDefault  bool            `json:"favoriteByDefault,omitempty"`
 	BlockKey           string          `json:"blockKey"`
 	Kind               string          `json:"kind"`
 	Name               string          `json:"name"`
@@ -292,6 +295,7 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 
 		blocks = append(blocks, blockBody{
 			BlockKey:           b.Key,
+			FavoriteByDefault:  b.FavoriteByDefault,
 			Kind:               string(b.Kind),
 			Name:               b.Name,
 			Description:        b.Description,

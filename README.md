@@ -617,3 +617,18 @@ SDK не тянет конкретный логгер: передайте сво
   другому адресу — задайте `CRMURL` соответственно.
 - Файлы (`client.Files`) ходят через префикс шлюза `/api/media`. Если media-service
   отдаётся по другому адресу — задайте `MediaURL` соответственно.
+
+### Default favorite blocks
+
+Set `FavoriteByDefault: true` on an `integration.Block` to append it to members'
+personal project favorites when the integration is installed:
+
+```go
+integration.Block{Key: "send-message", Kind: integration.KindAction,
+    Name: "Send message", FavoriteByDefault: true}
+```
+
+The default is false. The platform snapshots flagged keys on installation and seeds
+each member once (including future members). User removals/reordering are preserved.
+Manifest updates do not change defaults of existing installations; reinstalling takes
+a fresh snapshot. The wire property is `favoriteByDefault`.
