@@ -42,6 +42,7 @@ const (
 	DefaultCRMURL       = "https://aheron.pro/api/crm"
 	DefaultMediaURL     = "https://aheron.pro/api/media"
 	DefaultCatalogURL   = "https://aheron.pro/api"
+	DefaultLinksURL     = "https://link.aheron.pro/api"
 )
 
 // DefaultJWKSURL is the platform's well-known integration JWKS endpoint on
@@ -79,6 +80,8 @@ type Config struct {
 	// the gateway's "/api" prefix. Defaults to DefaultCatalogURL. Used by the
 	// Catalog client.
 	CatalogURL string
+	// LinksURL points directly to link-service, including /api. Proxies must preserve the signed request path.
+	LinksURL string
 
 	// PublicBaseURL is this integration's own externally reachable base URL, with
 	// no trailing slash. Catalog.Sync resolves the relative paths of a Manifest
@@ -110,6 +113,7 @@ type Client struct {
 	Files *FilesClient
 	// Catalog publishes this integration's own block and endpoint declarations.
 	Catalog *CatalogClient
+	Links   *LinksClient
 
 	integrationID string
 	signer        *sign.Signer
@@ -131,6 +135,9 @@ func New(cfg Config) (*Client, error) {
 	}
 	if cfg.CatalogURL == "" {
 		cfg.CatalogURL = DefaultCatalogURL
+	}
+	if cfg.LinksURL == "" {
+		cfg.LinksURL = DefaultLinksURL
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = NopLogger()
@@ -169,6 +176,7 @@ func New(cfg Config) (*Client, error) {
 	c.Triggers = &TriggersClient{http: execHTTP, id: cfg.IntegrationID, signer: signer}
 	c.CRM = &CRMClient{http: crmHTTP, apiKey: cfg.APIKey}
 	c.Files = &FilesClient{http: mediaHTTP, apiKey: cfg.APIKey}
+	c.Links = &LinksClient{http: httpclient.New(transportCfg(cfg.LinksURL)), baseURL: cfg.LinksURL, id: cfg.IntegrationID, signer: signer, apiKey: cfg.APIKey}
 	c.Catalog = &CatalogClient{
 		http:          catalogHTTP,
 		id:            cfg.IntegrationID,
