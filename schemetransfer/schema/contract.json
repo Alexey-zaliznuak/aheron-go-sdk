@@ -1,0 +1,1269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aheron.local/transfer/v1/contract.json",
+  "$defs": {
+    "validation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "basic",
+                "integration"
+              ]
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "const": "manualReview"
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "mode",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "selector": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "integrationResource"
+            },
+            "sourceKey": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          "required": [
+            "kind",
+            "sourceKey"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "subjectVariable"
+            },
+            "owner": {
+              "enum": [
+                "project",
+                "thisIntegration",
+                "projectOrThisIntegration"
+              ]
+            },
+            "valueType": {
+              "enum": [
+                "string",
+                "number",
+                "boolean",
+                "datetime",
+                "array",
+                "object"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "projectVariable"
+            },
+            "valueType": {
+              "enum": [
+                "string",
+                "number",
+                "boolean",
+                "datetime",
+                "array",
+                "object"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "tag",
+                "branch"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "default": {
+      "type": "object",
+      "properties": {
+        "owner": {
+          "enum": [
+            "project",
+            "thisIntegration"
+          ]
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "owner",
+        "key"
+      ],
+      "additionalProperties": false
+    },
+    "implicit": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "subjectVariable"
+        },
+        "owner": {
+          "const": "thisIntegration"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "valueType": {
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "datetime",
+            "array",
+            "object"
+          ]
+        },
+        "access": {
+          "enum": [
+            "read",
+            "write",
+            "readWrite"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "owner",
+        "key",
+        "valueType",
+        "access"
+      ],
+      "additionalProperties": false
+    },
+    "rule": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "object"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "nullable": {
+              "type": "boolean"
+            },
+            "unknownFields": {
+              "const": "reject"
+            },
+            "fields": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/rule"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "unknownFields",
+            "fields"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "array"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "nullable": {
+              "type": "boolean"
+            },
+            "items": {
+              "$ref": "#/$defs/rule"
+            }
+          },
+          "required": [
+            "kind",
+            "items"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "map"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "nullable": {
+              "type": "boolean"
+            },
+            "keys": {
+              "const": "literal"
+            },
+            "values": {
+              "$ref": "#/$defs/rule"
+            }
+          },
+          "required": [
+            "kind",
+            "keys",
+            "values"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "literal"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "valueType": {
+              "oneOf": [
+                {
+                  "enum": [
+                    "string",
+                    "number",
+                    "integer",
+                    "boolean",
+                    "null",
+                    "array",
+                    "object"
+                  ]
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "string",
+                      "number",
+                      "integer",
+                      "boolean",
+                      "null",
+                      "array",
+                      "object"
+                    ]
+                  },
+                  "minItems": 1,
+                  "uniqueItems": true
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "valueType"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "template"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "nullable": {
+              "type": "boolean"
+            },
+            "dialect": {
+              "const": "aheronVarsV1"
+            }
+          },
+          "required": [
+            "kind",
+            "dialect"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "reference"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "resource": {
+              "$ref": "#/$defs/selector"
+            },
+            "readAs": {
+              "enum": [
+                "id",
+                "key",
+                "value"
+              ]
+            },
+            "writeAs": {
+              "enum": [
+                "id",
+                "key",
+                "value"
+              ]
+            },
+            "access": {
+              "enum": [
+                "read",
+                "write",
+                "readWrite"
+              ]
+            },
+            "empty": {
+              "enum": [
+                "preserveNone",
+                "requireBinding",
+                "bindDefault"
+              ]
+            },
+            "defaultReference": {
+              "$ref": "#/$defs/default"
+            },
+            "constraints": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "resource",
+            "readAs",
+            "writeAs"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "omit"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "forbidden"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "copyRules": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "mode": {
+              "const": "unsupported"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "notes": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "version",
+            "mode",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "mode": {
+              "const": "literal"
+            },
+            "validation": {
+              "$ref": "#/$defs/validation"
+            },
+            "notes": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "version",
+            "mode",
+            "validation"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "mode": {
+              "const": "declared"
+            },
+            "settings": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/rule"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "object"
+                    }
+                  }
+                }
+              ]
+            },
+            "implicitResources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/implicit"
+              }
+            },
+            "validation": {
+              "$ref": "#/$defs/validation"
+            },
+            "notes": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "version",
+            "mode",
+            "settings",
+            "validation"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "valueType": {
+          "enum": [
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "object",
+            "array"
+          ]
+        },
+        "identityScope": {
+          "enum": [
+            "project",
+            "parent"
+          ]
+        },
+        "supports": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "search",
+              "resolve",
+              "identify"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "parameters": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "required": {
+                "type": "boolean"
+              },
+              "sourceKey": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              }
+            },
+            "required": [
+              "required",
+              "sourceKey"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "constraintsSchema": {
+          "type": "object"
+        },
+        "legacyAdapter": {
+          "type": "object",
+          "properties": {
+            "variableKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "variableKey"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "valueType",
+        "identityScope",
+        "supports"
+      ],
+      "additionalProperties": false
+    },
+    "resourceSources": {
+      "type": "object",
+      "maxProperties": 128,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[a-zA-Z0-9_-]+$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "lookupRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "integrationVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sourceKey": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            "parameters": {
+              "type": "object"
+            },
+            "constraints": {
+              "type": "object"
+            },
+            "mode": {
+              "const": "search"
+            },
+            "query": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "cursor": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "mode",
+            "projectId",
+            "integrationVersion",
+            "sourceKey"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "integrationVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sourceKey": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            "parameters": {
+              "type": "object"
+            },
+            "constraints": {
+              "type": "object"
+            },
+            "mode": {
+              "const": "resolve"
+            },
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1,
+              "maxItems": 100,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "mode",
+            "projectId",
+            "integrationVersion",
+            "sourceKey",
+            "ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "integrationVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sourceKey": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            "parameters": {
+              "type": "object"
+            },
+            "constraints": {
+              "type": "object"
+            },
+            "mode": {
+              "const": "identify"
+            },
+            "values": {
+              "type": "array",
+              "items": {},
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          "required": [
+            "mode",
+            "projectId",
+            "integrationVersion",
+            "sourceKey",
+            "values"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "resourceItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {},
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "selectable": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "value",
+        "title",
+        "selectable"
+      ],
+      "additionalProperties": false
+    },
+    "lookupResponse": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/resourceItem"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "identifyResponse": {
+      "type": "object",
+      "properties": {
+        "matches": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "inputIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "status": {
+                    "const": "found"
+                  },
+                  "item": {
+                    "$ref": "#/$defs/resourceItem"
+                  }
+                },
+                "required": [
+                  "inputIndex",
+                  "status",
+                  "item"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "inputIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "status": {
+                    "enum": [
+                      "missing",
+                      "ambiguous"
+                    ]
+                  }
+                },
+                "required": [
+                  "inputIndex",
+                  "status"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "matches"
+      ],
+      "additionalProperties": false
+    },
+    "issue": {
+      "type": "object",
+      "properties": {
+        "severity": {
+          "enum": [
+            "warning",
+            "review",
+            "error"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^(?:/(?:[^~/]|~0|~1)*)*$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stepRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resourceRef": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "severity",
+        "code",
+        "path",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "prepareCopyRequest": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": 1
+        },
+        "projectId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "integrationVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "blockKey": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "settings": {
+          "type": "object"
+        },
+        "schemeId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "projectId",
+        "integrationVersion",
+        "blockKey",
+        "settings",
+        "schemeId"
+      ],
+      "additionalProperties": false
+    },
+    "prepareCopyResponse": {
+      "type": "object",
+      "properties": {
+        "settings": {
+          "type": "object"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue"
+          }
+        }
+      },
+      "required": [
+        "settings",
+        "issues"
+      ],
+      "additionalProperties": false
+    },
+    "validateCopySettingsRequest": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": 1
+        },
+        "projectId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "integrationVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "blockKey": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "settings": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "projectId",
+        "integrationVersion",
+        "blockKey",
+        "settings"
+      ],
+      "additionalProperties": false
+    },
+    "validationResult": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "passed",
+            "needsReview",
+            "blocked"
+          ]
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue"
+          }
+        }
+      },
+      "required": [
+        "status",
+        "issues"
+      ],
+      "additionalProperties": false
+    },
+    "binding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "reference"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^(?:/(?:[^~/]|~0|~1)*)*$"
+            },
+            "resourceRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "writeAs": {
+              "enum": [
+                "id",
+                "key",
+                "value"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "resourceRef",
+            "writeAs"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "text"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^(?:/(?:[^~/]|~0|~1)*)*$"
+            },
+            "parts": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "resourceRef": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "accessPath": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    },
+                    "required": [
+                      "resourceRef"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "parts"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "importPlan": {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "importId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "templateRevisionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "planRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "mode": {
+              "const": "newScheme"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "projectId",
+            "mode",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "autoPolicy": {
+          "const": "exactKeyOrCreate"
+        },
+        "status": {
+          "enum": [
+            "needsInput",
+            "ready",
+            "applying",
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "resourceMappings": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "enum": [
+                      "reuse",
+                      "select"
+                    ]
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "action",
+                  "id"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "enum": [
+                      "main",
+                      "unresolved"
+                    ]
+                  }
+                },
+                "required": [
+                  "action"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "const": "create"
+                  },
+                  "definition": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "key": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "valueType": {
+                        "enum": [
+                          "string",
+                          "number",
+                          "boolean",
+                          "datetime",
+                          "array",
+                          "object"
+                        ]
+                      },
+                      "color": {
+                        "type": "string",
+                        "pattern": "^#[0-9a-fA-F]{6}$"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "value": {}
+                    },
+                    "required": [
+                      "name",
+                      "key"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "definition"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "formatVersion",
+        "importId",
+        "templateRevisionId",
+        "planRevision",
+        "digest",
+        "expiresAt",
+        "target",
+        "autoPolicy",
+        "status",
+        "resourceMappings"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

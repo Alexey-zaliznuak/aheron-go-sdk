@@ -1,0 +1,15 @@
+{
+  "mode": "identify",
+  "projectId": "20000000-0000-4000-8000-000000000002",
+  "integrationVersion": 1,
+  "sourceKey": "sheetColumns",
+  "parameters": {
+    "sheet": "source-sheet-a"
+  },
+  "values": [
+    {
+      "index": 2,
+      "name": "Email"
+    }
+  ]
+}

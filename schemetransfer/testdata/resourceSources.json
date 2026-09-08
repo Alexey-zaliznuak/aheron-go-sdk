@@ -1,0 +1,88 @@
+{
+  "paymentAccounts": {
+    "valueType": "string",
+    "identityScope": "project",
+    "supports": [
+      "search",
+      "resolve"
+    ],
+    "constraintsSchema": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": [
+            "live",
+            "test"
+          ]
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "legacyAdapter": {
+      "variableKey": "paymentAccounts"
+    }
+  },
+  "channels": {
+    "valueType": "string",
+    "identityScope": "project",
+    "supports": [
+      "search",
+      "resolve"
+    ],
+    "constraintsSchema": {
+      "type": "object",
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "legacyAdapter": {
+      "variableKey": "channels"
+    }
+  },
+  "sheetColumns": {
+    "valueType": "object",
+    "identityScope": "parent",
+    "supports": [
+      "search",
+      "resolve",
+      "identify"
+    ],
+    "parameters": {
+      "sheet": {
+        "required": true,
+        "sourceKey": "sheets"
+      }
+    }
+  },
+  "sheets": {
+    "valueType": "string",
+    "identityScope": "project",
+    "supports": [
+      "search",
+      "resolve"
+    ],
+    "legacyAdapter": {
+      "variableKey": "google_sheet"
+    }
+  },
+  "products": {
+    "valueType": "string",
+    "identityScope": "project",
+    "supports": [
+      "search",
+      "resolve"
+    ]
+  }
+}

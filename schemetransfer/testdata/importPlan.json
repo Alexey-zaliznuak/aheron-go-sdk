@@ -1,0 +1,55 @@
+{
+  "importId": "40000000-0000-4000-8000-000000000001",
+  "templateRevisionId": "50000000-0000-4000-8000-000000000001",
+  "target": {
+    "projectId": "20000000-0000-4000-8000-000000000001",
+    "mode": "newScheme",
+    "name": "Продажа курса"
+  },
+  "autoPolicy": "exactKeyOrCreate",
+  "status": "needsInput",
+  "resourceMappings": {
+    "b0": {
+      "action": "main"
+    },
+    "b1": {
+      "action": "create",
+      "definition": {
+        "key": "paid",
+        "name": "Оплачено",
+        "color": "#16A34A"
+      }
+    },
+    "sv0": {
+      "action": "reuse",
+      "id": "60000000-0000-4000-8000-000000000001"
+    },
+    "pv0": {
+      "action": "create",
+      "definition": {
+        "key": "course_name",
+        "name": "Название курса",
+        "valueType": "string",
+        "value": "Курс по фотографии"
+      }
+    },
+    "t0": {
+      "action": "create",
+      "definition": {
+        "key": "customer",
+        "name": "Покупатель"
+      }
+    },
+    "ir0": {
+      "action": "select",
+      "id": "target-account-a"
+    },
+    "ir1": {
+      "action": "unresolved"
+    }
+  },
+  "formatVersion": 1,
+  "planRevision": 1,
+  "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "expiresAt": "2026-09-09T12:00:00Z"
+}

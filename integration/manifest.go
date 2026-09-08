@@ -20,6 +20,8 @@ import (
 	"io/fs"
 	"path"
 	"strings"
+
+	"github.com/Alexey-zaliznuak/aheron-go-sdk/schemetransfer"
 )
 
 // Kind is the block kind the platform renders and executes.
@@ -44,7 +46,9 @@ const (
 // the integration rather than typed by the user. Type is currently always
 // "remote"; the struct exists so a source can grow options without a wire break.
 type VariableValueSource struct {
-	Type string `json:"type"`
+	Type           string `json:"type"`
+	SourceKey      string `json:"sourceKey,omitempty"`
+	ValueSemantics string `json:"valueSemantics,omitempty"`
 }
 
 // RemoteVariableValues is the only variable value source the platform supports:
@@ -86,6 +90,8 @@ type Block struct {
 	// SubflowDeclaration carries optional extra metadata for a KindSubflow
 	// block. It is passed to the platform verbatim.
 	SubflowDeclaration json.RawMessage
+	// CopyRules belongs to this block declaration, not to an instance settings object.
+	CopyRules *schemetransfer.CopyRules
 }
 
 // ConsolePage is one page of the integration's console that the platform pins
@@ -150,8 +156,12 @@ type Manifest struct {
 	TriggerSyncPath string
 	// VariableValuesPath serves VariableValuesRequest for the variables listed
 	// in VariableValueSources. Declaring sources without a path is rejected.
-	VariableValuesPath   string
-	VariableValueSources map[string]VariableValueSource
+	VariableValuesPath       string
+	VariableValueSources     map[string]VariableValueSource
+	ResourceValuesPath       string
+	PrepareCopyPath          string
+	ValidateCopySettingsPath string
+	ResourceSources          map[string]schemetransfer.ResourceSource
 	// Blocks is the complete block set of the version.
 	Blocks []Block
 	// Retired lists block keys that used to be declared and are deliberately
@@ -167,17 +177,21 @@ type Manifest struct {
 // absolute URLs; an endpoint the manifest does not offer is omitted, which the
 // platform reads as "clear it".
 type manifestBody struct {
-	ConsoleURL            string                         `json:"consoleUrl,omitempty"`
-	ConsolePages          []consolePageBody              `json:"consolePages,omitempty"`
-	InstallURL            string                         `json:"installUrl,omitempty"`
-	UninstallURL          string                         `json:"uninstallUrl,omitempty"`
-	ActionURL             string                         `json:"actionUrl,omitempty"`
-	ActionRequestTemplate json.RawMessage                `json:"actionRequestTemplate,omitempty"`
-	TriggerSyncURL        string                         `json:"triggerSyncUrl,omitempty"`
-	VariableValuesURL     string                         `json:"variableValuesUrl,omitempty"`
-	VariableValueSources  map[string]VariableValueSource `json:"variableValueSources,omitempty"`
-	Blocks                []blockBody                    `json:"blocks"`
-	Retired               []string                       `json:"retired,omitempty"`
+	ResourceValuesURL       string                                   `json:"resourceValuesUrl,omitempty"`
+	PrepareCopyURL          string                                   `json:"prepareCopyUrl,omitempty"`
+	ValidateCopySettingsURL string                                   `json:"validateCopySettingsUrl,omitempty"`
+	ResourceSources         map[string]schemetransfer.ResourceSource `json:"resourceSources,omitempty"`
+	ConsoleURL              string                                   `json:"consoleUrl,omitempty"`
+	ConsolePages            []consolePageBody                        `json:"consolePages,omitempty"`
+	InstallURL              string                                   `json:"installUrl,omitempty"`
+	UninstallURL            string                                   `json:"uninstallUrl,omitempty"`
+	ActionURL               string                                   `json:"actionUrl,omitempty"`
+	ActionRequestTemplate   json.RawMessage                          `json:"actionRequestTemplate,omitempty"`
+	TriggerSyncURL          string                                   `json:"triggerSyncUrl,omitempty"`
+	VariableValuesURL       string                                   `json:"variableValuesUrl,omitempty"`
+	VariableValueSources    map[string]VariableValueSource           `json:"variableValueSources,omitempty"`
+	Blocks                  []blockBody                              `json:"blocks"`
+	Retired                 []string                                 `json:"retired,omitempty"`
 }
 
 // consolePageBody is the wire shape of one resolved console page. Icon bytes
@@ -197,16 +211,17 @@ type iconBody struct {
 // blockBody is the wire shape of one resolved block declaration. Field names
 // match the platform's block declaration payload.
 type blockBody struct {
-	FavoriteByDefault  bool            `json:"favoriteByDefault,omitempty"`
-	BlockKey           string          `json:"blockKey"`
-	Kind               string          `json:"kind"`
-	Name               string          `json:"name"`
-	Description        string          `json:"description,omitempty"`
-	Color              string          `json:"color,omitempty"`
-	IframeURL          string          `json:"iframeUrl,omitempty"`
-	Inputs             []string        `json:"inputs"`
-	Outputs            []string        `json:"outputs"`
-	SubflowDeclaration json.RawMessage `json:"subflowDeclaration,omitempty"`
+	CopyRules          *schemetransfer.CopyRules `json:"copyRules,omitempty"`
+	FavoriteByDefault  bool                      `json:"favoriteByDefault,omitempty"`
+	BlockKey           string                    `json:"blockKey"`
+	Kind               string                    `json:"kind"`
+	Name               string                    `json:"name"`
+	Description        string                    `json:"description,omitempty"`
+	Color              string                    `json:"color,omitempty"`
+	IframeURL          string                    `json:"iframeUrl,omitempty"`
+	Inputs             []string                  `json:"inputs"`
+	Outputs            []string                  `json:"outputs"`
+	SubflowDeclaration json.RawMessage           `json:"subflowDeclaration,omitempty"`
 }
 
 // validKinds is the set accepted by the platform, checked here so a typo fails
@@ -251,6 +266,41 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 		return manifestBody{}, fmt.Errorf("integration: manifest ActionRequestTemplate is not valid JSON")
 	}
 
+	resourceURL, err := resolveURL(base, m.ResourceValuesPath, "ResourceValuesPath")
+	if err != nil {
+		return manifestBody{}, err
+	}
+	prepareURL, err := resolveURL(base, m.PrepareCopyPath, "PrepareCopyPath")
+	if err != nil {
+		return manifestBody{}, err
+	}
+	validateURL, err := resolveURL(base, m.ValidateCopySettingsPath, "ValidateCopySettingsPath")
+	if err != nil {
+		return manifestBody{}, err
+	}
+	rules := map[string]*schemetransfer.CopyRules{}
+	for _, b := range m.Blocks {
+		rules[b.Key] = b.CopyRules
+	}
+	if err := schemetransfer.ValidateDeclaration(m.ResourceSources, rules, resourceURL, validateURL); err != nil {
+		return manifestBody{}, err
+	}
+	for key, source := range m.VariableValueSources {
+		if source.Type != "remote" {
+			return manifestBody{}, fmt.Errorf("integration: unsupported variable value source %q", key)
+		}
+		if (source.SourceKey == "") != (source.ValueSemantics == "") {
+			return manifestBody{}, fmt.Errorf("integration: sourceKey and valueSemantics must be declared together for %q", key)
+		}
+		if source.SourceKey != "" {
+			if source.ValueSemantics != "resource" {
+				return manifestBody{}, fmt.Errorf("integration: invalid valueSemantics for %q", key)
+			}
+			if _, ok := m.ResourceSources[source.SourceKey]; !ok {
+				return manifestBody{}, fmt.Errorf("integration: unknown resource source for %q", key)
+			}
+		}
+	}
 	pages, err := m.resolveConsolePages(base)
 	if err != nil {
 		return manifestBody{}, err
@@ -304,10 +354,12 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 			Inputs:             nonNil(b.Inputs),
 			Outputs:            nonNil(b.Outputs),
 			SubflowDeclaration: b.SubflowDeclaration,
+			CopyRules:          b.CopyRules,
 		})
 	}
 
 	return manifestBody{
+		ResourceValuesURL: resourceURL, PrepareCopyURL: prepareURL, ValidateCopySettingsURL: validateURL, ResourceSources: m.ResourceSources,
 		ConsoleURL:            consoleURL,
 		ConsolePages:          pages,
 		InstallURL:            installURL,

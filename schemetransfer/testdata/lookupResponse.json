@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "id": "target-column-a",
+      "value": {
+        "index": 2,
+        "name": "Email"
+      },
+      "title": "Email",
+      "selectable": true
+    }
+  ]
+}
