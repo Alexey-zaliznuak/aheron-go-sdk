@@ -9,7 +9,7 @@ import (
 func testVars(t *testing.T) Vars {
 	t.Helper()
 
-	return ParseVars(json.RawMessage(`{
+	v, err := ParseVars(json.RawMessage(`{
 		"project": {"city": "Москва", "shared": "проектная"},
 		"subject": {
 			"name": "Иван",
@@ -23,6 +23,10 @@ func testVars(t *testing.T) Vars {
 		},
 		"integrations": {"messengers": {"tgUserId": "42"}}
 	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
 }
 
 func TestVarsLookup(t *testing.T) {
@@ -35,12 +39,12 @@ func TestVarsLookup(t *testing.T) {
 		found bool
 	}{
 		{"a subject variable by its bare key", "name", "Иван", true},
-		{"a project variable by its bare key", "city", "Москва", true},
-		{"project wins a bare key collision", "shared", "проектная", true},
+		{"no project fallback", "city", nil, false},
+		{"subject wins a bare key collision", "shared", "субъектная", true},
 		{"the subject namespace", "subject.shared", "субъектная", true},
 		{"the project namespace", "project.shared", "проектная", true},
 		{"another integration's variable", "messengers.tgUserId", "42", true},
-		{"a path into a structured variable", "payment.id", "p-1", true},
+		{"a path into a structured variable", "subject.payment.id", "p-1", true},
 		{"an unknown key", "nope", nil, false},
 		{"an unknown namespace", "nope.nope", nil, false},
 		{"a known namespace without the key", "subject.nope", nil, false},
@@ -76,13 +80,12 @@ func TestVarsSubstitute(t *testing.T) {
 		{"a null variable", "[{{empty}}]", "[]"},
 		{"an unknown variable", "Заказ {{nope}}", "Заказ "},
 		{"a namespaced variable", "{{project.city}}", "Москва"},
-		{"a path into a structured variable", "{{payment.amount}}", "199.5"},
+		{"a path into a structured variable", "{{subject.payment.amount}}", "199.5"},
 		{"a structured variable", "{{items}}", `["a","b"]`},
 		{"an empty template", "", ""},
-		{"an unclosed placeholder", "{{name", "{{name"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := vars.Substitute(tc.template); got != tc.want {
+			if got, err := vars.Substitute(tc.template); err != nil || got != tc.want {
 				t.Errorf("Substitute(%q) = %q, want %q", tc.template, got, tc.want)
 			}
 		})
@@ -93,35 +96,50 @@ func TestVarsSubstitute(t *testing.T) {
 // own needs: the escape applies to the substituted value, never to the template
 // around it.
 func TestVarsSubstituteFuncEscapes(t *testing.T) {
-	vars := ParseVars(json.RawMessage(`{"subject": {"name": "<b>Иван</b>"}}`))
+	vars, err := ParseVars(json.RawMessage(`{"subject": {"name": "<b>Иван</b>"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	escape := func(s string) string { return strings.ReplaceAll(s, "<", "&lt;") }
 
-	got := vars.SubstituteFunc("<i>{{name}}</i>", escape)
-	if want := "<i>&lt;b>Иван&lt;/b></i>"; got != want {
+	got, err := vars.SubstituteFunc("<i>{{name}}</i>", escape)
+	if want := "<i>&lt;b>Иван&lt;/b></i>"; err != nil || got != want {
 		t.Errorf("SubstituteFunc = %q, want %q", got, want)
 	}
 }
 
-func TestParseVarsTolerateUnusablePayloads(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		raw  string
-	}{
-		{"absent", ""},
-		{"null", "null"},
-		{"an array", `["a"]`},
-		{"broken json", `{"a":`},
-		{"a flat map without the namespaces", `{"name": "Иван"}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			vars := ParseVars(json.RawMessage(tc.raw))
-			if _, ok := vars.Lookup("name"); ok {
-				t.Error("Lookup found a value in an unusable payload")
-			}
-			if got := vars.Substitute("[{{name}}]"); got != "[]" {
-				t.Errorf("Substitute = %q, want %q", got, "[]")
-			}
-		})
+func TestParseVarsRejectsInvalidPayloads(t *testing.T) {
+	for _, raw := range []string{`["a"]`, `{"a":`, `{"name":"Иван"}`, `{"subject":{},"project":[]}`, `{} {}`, `{"subject":{"ok":1},"project":"bad"}`} {
+		vars, err := ParseVars(json.RawMessage(raw))
+		if err == nil {
+			t.Fatalf("expected error for %s", raw)
+		}
+		if _, ok := vars.Lookup("ok"); ok {
+			t.Fatal("partially decoded scope escaped")
+		}
+	}
+	for _, raw := range []string{"", "null", "{}"} {
+		vars, err := ParseVars(json.RawMessage(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := vars.Substitute("[{{unknown}}]"); err != nil || got != "[]" {
+			t.Fatalf("%q %v", got, err)
+		}
+	}
+}
+
+func TestUnifiedScopeAndExactNumbers(t *testing.T) {
+	vars, err := ParseVars(json.RawMessage(`{"projectId":"actual-project","project":{"id":"shadow","amount":99},"subject":{"amount":9007199254740993,"price":1.5e5},"integrations":{"payments":{"amount":3}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := vars.Substitute("{{amount}}|{{project.amount}}|{{payments.amount}}|{{project.id}}|{{price}}")
+	if err != nil || got != "9007199254740993|99|3|actual-project|150000" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if _, err := vars.Substitute("secret {{broken"); err == nil {
+		t.Fatal("malformed template accepted")
 	}
 }

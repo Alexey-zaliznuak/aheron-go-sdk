@@ -245,50 +245,61 @@ keyed-протоколе `variables` должны быть `nil`/пустыми,
 
 ### Переменные в настройках блока (`{{vars}}`)
 
-`{{vars}}` — **не плоская карта**. Платформа присылает три пространства имён:
+Общий пакет `variables` реализует `aheronVarsV1` для исполнения и переноса схем.
+`integration.Vars` использует тот же parser и resolver. `ParseVars`, `Substitute`
+и `SubstituteFunc` возвращают ошибки: потребитель должен обработать их до внешнего
+действия блока. Это изменение API и смысла bare keys по сравнению с прежним SDK.
 
 ```json
 {
-  "project":      { "<ключ>": "значение" },
-  "subject":      { "<ключ>": "значение" },
-  "integrations": { "<slug>": { "<ключ>": "значение" } }
+  "projectId": "target-project",
+  "project": { "course": "Go" },
+  "subject": { "name": "Иван" },
+  "integrations": { "payments": { "payment_url": "https://example.test/pay" } }
 }
 ```
 
-Поэтому интеграция, читающая тело как `ключ → значение`, не найдёт ничего по
-голому ключу и молча подставит пустые строки туда, где автор ждал переменную.
-Не разбирайте эту структуру руками — декодируйте её через `integration.Vars`:
+- `{{foo}}` и `{{subject.foo}}` читают только пользовательскую subject variable.
+- `{{project.foo}}` читает project variable. `{{project.id}}` — системный ID из
+  `projectId` конверта, а не значение переменной с ключом `id`.
+- `{{payments.foo}}` читает definition интеграции payments. Установка/удаление
+  интеграции не меняет интерпретацию: нет fallback к объекту subject или project.
+- `{{subject.order.items.0.title}}` читает поле объекта/элемент массива. `order.items`
+  без `subject.` означает integration slug `order`, а не subject object.
+- `context.*` и `integrationState.*` зарезервированы для runtime; платформа
+  передаёт их только в соответствующем контексте. Эти ссылки не являются definitions.
+- Корень адресуется key либо ID, если владелец загрузил ID как alias. Parser сам
+  не ищет definitions. Путь состоит из разделённых точкой непустых сегментов
+  (буквы, цифры, `_`, `-`); JSON-ключи с пробелами/точками и bracket notation пока
+  не поддержаны. Массивы используют индексы `0`, `1`, …, без знака/ведущих нулей.
 
 ```go
-var body struct {
-	integration.ExecutionContext                 // {{context}}
-	ActionKey                    string          `json:"actionKey"`
-	Settings                     json.RawMessage `json:"blockSettings"`
-	Vars                         json.RawMessage `json:"vars"`
+vars, err := integration.ParseVars(body.Vars)
+if err != nil {
+    return err // map to the integration's invalid-input error
 }
-if err := integration.DecodeBody(r, &body); err != nil {
-	return err
+text, err := vars.Substitute("Курс {{project.course}} для {{subject.name}}")
+if err != nil {
+    return err
 }
-
-vars := integration.ParseVars(body.Vars)
-text := vars.Substitute("Заказ {{orderId}} от {{name}}")
 ```
 
-- `vars.Substitute(template)` — подставляет каждый `{{ключ}}`; неизвестный ключ
-  превращается в пустую строку, а не утекает плейсхолдером в результат.
-- `vars.SubstituteFunc(template, escape)` — то же с экранированием подставляемых
-  значений: для шаблонов со своим синтаксисом (например HTML-текст сообщения),
-  где значение не должно протащить разметку.
-- `vars.Lookup(key)` — одно значение как `any` плюс признак «нашлось».
-- `integration.VarString(value)` — строковая форма значения: число без хвостовых
-  нулей (в JSON нет целых, `1024` приходит как float), объект — компактным JSON.
+Отсутствующий/null конверт — пустая область. Некорректный или плоский конверт
+отклоняется. JSON-числа сохраняются через `json.Number`, включая целые больше
+2^53; экспонента раскрывается без float64 и с ограничением размера результата.
+Неизвестная ссылка в runtime-тексте даёт пустую строку. Незакрытый или некорректный
+placeholder даёт ошибку с позицией, без частично обработанного текста.
+`SubstituteFunc(template, escape)` экранирует только значения и ровно один раз.
+Подставленное значение не разбирается как новый шаблон.
 
-Голый ключ — это сначала переменная проекта, потом субъекта (так работают ключи,
-которые предлагают редакторы блоков). Ключ с точкой выбирает пространство имён:
-`project.<ключ>`, `subject.<ключ>`, а любой другой префикс — slug интеграции в
-каталоге, то есть способ прочитать значения **другой** интеграции. Если префикс
-не назвал пространство имён, путь применяется к самому значению, так что
-переменная-объект доступна как `{{payment.amount}}`.
+Для экспорта: `variables.ParseV1(text)` → `Template.Parts()` → разрешение каждой
+`Reference` через каталог definitions → общий resourceRef. `Scope`, `Namespace`,
+`Key` и `AccessPath` доступны отдельно от runtime-значений. `project.id` и другие
+runtime-ссылки сохраняются как runtimeRef. `Template.Rewrite` восстанавливает явные
+ссылки после сопоставления; это не мигратор старого синтаксиса и не importer графа.
+Для собственного renderer используйте `Template.Render` с `Resolver`; по умолчанию
+отсутствующая ссылка — ошибка (`MissingError`), `MissingEmpty` включается явно.
+Загрузка CRM, сопоставление definitions, права, математика и HTML остаются у владельцев.
 
 ### Динамические значения переменных
 
