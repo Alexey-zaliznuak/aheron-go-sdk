@@ -91,9 +91,13 @@ const verifiedKey ctxKey = iota
 // failure it writes 401 with a JSON error and does not call next.
 func (v *Verifier) Verify(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(io.LimitReader(r.Body, v.maxBody))
+		body, err := io.ReadAll(io.LimitReader(r.Body, v.maxBody+1))
 		if err != nil {
 			v.reject(w, "read body", err)
+			return
+		}
+		if int64(len(body)) > v.maxBody {
+			v.reject(w, "body too large", nil)
 			return
 		}
 

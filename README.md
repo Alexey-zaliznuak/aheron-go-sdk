@@ -701,9 +701,10 @@ unless `required`; containers/templates can explicitly allow null with `nullable
 an integration-owned default. `literal` is an explicit declaration that all
 settings are portable; an empty rules object does not grant that permission.
 
-Lookup, preparation and validation DTOs are contracts only. This release does not
-add HTTP routes, run callbacks, create resources, publish templates, or import a
-graph. Receivers must check pinned integration versions and project ownership;
+The SDK provides signed, read-only HTTP wrappers for lookup, preparation and
+validation; see [copy callbacks](docs/copy-callbacks.md). These wrappers do not
+create resources, publish templates, or import a graph. Receivers must check
+pinned integration versions and project ownership;
 `validateCopySettings` must remain read-only. `PrepareCopyResponse.settings` must
 pass the same copy rules again before anything is published. Additional dynamic
 resource requirements require an explicit protocol extension, never arbitrary
