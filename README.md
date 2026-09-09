@@ -651,6 +651,29 @@ RegisterCallback declares an HTTPS URL and enabled state for an endpointKey. Cre
 
 ## Scheme transfer contracts (v0.26.0)
 
+### Target resource provisioning (v0.27.0)
+
+`schemetransfer.ProvisionRequest` / `ProvisionResult` define the internal CRM
+contract for one native subject definition, project variable or tag. The request
+selects `reuse` (ID + expected key/type) or `create` (key/type/name/description,
+and an explicitly supplied value for a new project variable). Subject values,
+defaults and integration-owned definitions are excluded. Compatible exact-key
+resources appearing concurrently may be reused; existing values are never updated.
+
+`transfercrm.New(baseURL, internalToken, httpClient)` creates the platform client.
+`ProvisionResource(ctx, projectID, importID, resourceRef, request)` sends a PUT to
+`/internal/projects/{projectId}/scheme-imports/{importId}/resources/{resourceRef}`.
+The same address and request digest return the stored receipt. Different payloads
+conflict. Persist these addresses in the importing service before sending requests.
+The receipt contains only ID, kind, key, type and whether this import created it.
+
+The client validates bounded requests and responses, preserves JSON number tokens,
+does not follow redirects, and never propagates response bodies or credentials in
+errors. Pass a bounded context and a client with timeouts. This client uses the
+platform's internal credential; it must not be exposed to integration/browser code.
+
+### Copy declarations and portable bindings
+
 The `schemetransfer` package owns version 1 JSON contracts and the embedded
 JSON Schema (`schemetransfer.Schema()`). `Validate` accepts a schema definition
 name, e.g. `copyRules`, `resourceSources`, `lookupRequest`, `validationResult`,
