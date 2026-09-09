@@ -84,3 +84,21 @@ also avoid settings and credentials.
 same validation used on the platform side; the latter binds a response to the
 original request. No callbacks, requests or resource writes happen in these
 pure functions. Existing `HandleVariableValues` filters remain compatible.
+
+## Catalog and source checks (v0.29.0)
+
+`Catalog.StartSyncWithObserver(ctx, manifest, observer)` retains startup retry and
+logging behavior and reports the successful SyncResult once. The observer must
+check `Published` and positive `Version`; an unpublished draft is also reported.
+An integration can atomically remember this version for its CopyVersionGuard.
+Until successful publication, copy callbacks remain unavailable; ordinary actions
+and service readiness do not depend on it. This conservative policy accepts only
+the version registered by the running deployment. Supporting older contracts
+requires an explicit compatibility policy; never accept arbitrary versions.
+
+`schemetransfer.ValidateSourceLookup` validates supported modes, known/required
+parent parameters, their declared value types and source constraints. It does not
+resolve parent IDs or check ownership. Callers assemble parent values only after
+resolving their identities through the appropriate source in the target project.
+`ValidateResourceValue` validates returned values, including exact integer types.
+Constraints schemas cannot load external resources.

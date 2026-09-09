@@ -112,6 +112,14 @@ const (
 // It waits out a short jitter, then retries a handful of times with backoff,
 // stopping as soon as the sync succeeds or ctx is cancelled.
 func (c *CatalogClient) StartSync(ctx context.Context, m Manifest) {
+	c.StartSyncWithObserver(ctx, m, nil)
+}
+
+// StartSyncWithObserver keeps StartSync's retry/readiness behavior and reports
+// the successful catalog result once. The observer runs synchronously, including
+// for an unchanged manifest or an unpublished draft. Consumers must explicitly
+// check Published and Version before enabling version-dependent features.
+func (c *CatalogClient) StartSyncWithObserver(ctx context.Context, m Manifest, observe func(SyncResult)) {
 	if !sleepCtx(ctx, rand.N(syncStartJitter)) {
 		return
 	}
@@ -120,6 +128,9 @@ func (c *CatalogClient) StartSync(ctx context.Context, m Manifest) {
 	for attempt := 1; attempt <= syncAttempts; attempt++ {
 		result, err := c.Sync(ctx, m)
 		if err == nil {
+			if observe != nil {
+				observe(result)
+			}
 			switch {
 			case !result.Changed:
 				c.log.Info("integration catalog already up to date",
