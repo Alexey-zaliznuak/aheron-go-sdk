@@ -682,6 +682,15 @@ name, e.g. `copyRules`, `resourceSources`, `lookupRequest`, `validationResult`,
 versions and oversized/deep documents. Errors contain a code/path, not values.
 Schema compilation never loads external URLs or files.
 
+An import mapping may use `{"action":"defer"}` for an integration resource.
+It contains no `id` or `definition`. The platform importer checks eligibility,
+leaves the corresponding settings empty, and saves an inactive graph with
+per-step setup requirements. Target lookup and target-dependent block validation
+may be postponed, but installed integration contracts and the structural binding
+audit remain mandatory. Activation requires configuration and normal validation.
+This action does not apply to native variable provisioning or fixed integration
+variable definitions, and introduces no new integration callback.
+
 `Block.CopyRules` describes a block's settings; no rules means no transfer support.
 The manifest adds `ResourceSources`, `ResourceValuesPath`, `PrepareCopyPath`, and
 `ValidateCopySettingsPath`. Paths resolve using `PublicBaseURL` and travel in the

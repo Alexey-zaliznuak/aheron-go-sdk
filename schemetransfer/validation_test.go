@@ -33,6 +33,32 @@ func TestDocumentedContractFixtures(t *testing.T) {
 	}
 }
 
+func TestDeferredMappingCarriesNoIdentity(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "importPlan.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan ImportPlan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, mapping := range []ResourceMapping{
+		{Action: "defer"},
+		{Action: "defer", ID: "source-id"},
+		{Action: "defer", Definition: &NewDefinition{Name: "test", Key: "test"}},
+	} {
+		plan.ResourceMappings["terminal"] = mapping
+		encoded, err := json.Marshal(plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		valid := mapping.ID == "" && mapping.Definition == nil
+		if err := Validate("importPlan", encoded); (err == nil) != valid {
+			t.Fatalf("mapping %+v: %v", mapping, err)
+		}
+	}
+}
+
 const validRules = `{"version":1,"mode":"declared","validation":{"mode":"integration"},"settings":{"kind":"object","unknownFields":"reject","fields":{"channel":{"kind":"reference","resource":{"kind":"integrationResource","sourceKey":"channels"},"readAs":"value","writeAs":"value"},"text":{"kind":"template","dialect":"aheronVarsV1"}}}}`
 
 func TestCopyRulesRejectInvalidOrAmbiguousContracts(t *testing.T) {

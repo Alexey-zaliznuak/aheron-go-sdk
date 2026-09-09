@@ -221,6 +221,9 @@ type ImportTarget struct {
 	Name      string `json:"name"`
 }
 type ResourceMapping struct {
+	// defer leaves an integration resource unconfigured in an inactive copy.
+	// It carries neither a source identity nor a target identity. The importer
+	// must retain setup requirements and check them before activation.
 	Action     string         `json:"action"`
 	ID         string         `json:"id,omitempty"`
 	Definition *NewDefinition `json:"definition,omitempty"`
