@@ -65,6 +65,11 @@ tasks:
       - go test ./...
       - go test ./{{.YDB_DIR}}/...
 
+  test:lifecycle:
+    desc: 'Verify lifecycle ordering, receipts and signed delivery (optional -- -race)'
+    cmds:
+      - go test ./integration -run '^TestLifecycle' -count=1 {{.CLI_ARGS}}
+
   check:
     desc: Run all local checks (fmt, tidy, vet, test)
     cmds:

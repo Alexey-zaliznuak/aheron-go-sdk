@@ -90,6 +90,11 @@ const verifiedKey ctxKey = iota
 // success, calls next with the verified body available to DecodeBody. On any
 // failure it writes 401 with a JSON error and does not call next.
 func (v *Verifier) Verify(next http.Handler) http.Handler {
+	return v.verify(next, "")
+}
+
+// domain is fixed by the endpoint, never selected from the request body.
+func (v *Verifier) verify(next http.Handler, domain string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(io.LimitReader(r.Body, v.maxBody+1))
 		if err != nil {
@@ -119,7 +124,12 @@ func (v *Verifier) Verify(next http.Handler) http.Handler {
 			v.reject(w, "select key", err)
 			return
 		}
-		if err := sign.Verify(key, timestamp, body, signature); err != nil {
+		if domain == "" {
+			err = sign.Verify(key, timestamp, body, signature)
+		} else {
+			err = sign.VerifyDomain(key, domain, timestamp, body, signature)
+		}
+		if err != nil {
 			v.reject(w, "verify signature", err)
 			return
 		}

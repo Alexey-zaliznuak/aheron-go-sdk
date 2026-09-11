@@ -14,10 +14,11 @@
 //     X-Integration-Id / X-Integration-Timestamp / X-Integration-Signature. The
 //     platform verifies it with the integration's registered public key.
 //
-// The signature is always Ed25519 over the canonical bytes "<timestamp>.<body>",
+// Legacy signatures are Ed25519 over the canonical bytes "<timestamp>.<body>",
 // where timestamp is the unix-seconds string carried in the matching header and
 // body is the exact raw request body. Both sides also check timestamp freshness
-// against a narrow window to blunt replay.
+// against a narrow window to blunt replay. Lifecycle messages use a domain
+// prefix BEFORE the timestamp; see SignDomain and VerifyDomain.
 package sign
 
 import (
@@ -84,6 +85,10 @@ func Sign(priv ed25519.PrivateKey, timestamp string, body []byte) string {
 // "<timestamp>.<body>" under pub. It returns ErrMalformed for unparseable
 // material and ErrInvalidSignature when the signature does not verify.
 func Verify(pub ed25519.PublicKey, timestamp string, body []byte, signatureB64 string) error {
+	return verifyInput(pub, signingInput(timestamp, body), signatureB64)
+}
+
+func verifyInput(pub ed25519.PublicKey, input []byte, signatureB64 string) error {
 	if len(pub) != ed25519.PublicKeySize {
 		return fmt.Errorf("%w: public key must be %d bytes, got %d", ErrMalformed, ed25519.PublicKeySize, len(pub))
 	}
@@ -94,7 +99,7 @@ func Verify(pub ed25519.PublicKey, timestamp string, body []byte, signatureB64 s
 	if len(sig) != ed25519.SignatureSize {
 		return fmt.Errorf("%w: signature must be %d bytes, got %d", ErrMalformed, ed25519.SignatureSize, len(sig))
 	}
-	if !ed25519.Verify(pub, signingInput(timestamp, body), sig) {
+	if !ed25519.Verify(pub, input, sig) {
 		return ErrInvalidSignature
 	}
 	return nil
