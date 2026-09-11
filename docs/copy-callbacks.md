@@ -1,4 +1,4 @@
-# Copy callbacks (v0.28.0)
+# Signed copy callbacks
 
 Register three independent POST handlers on the paths declared in the manifest:
 
@@ -51,12 +51,15 @@ grant access. Never trust an ID merely because it came from a selector.
 ## Preparation and validation
 
 `PrepareCopy` receives source project, scheme, pinned integration version,
-block key and original settings. It returns explicit settings and `issues`.
-The exporter must still run copy rules on those settings before publication;
-prepared settings can contain source IDs and are not a portable document.
+block key, original settings and `protocolVersion: 2`. It returns the matching
+protocol version, prepared settings, a private `plan` and `issues`. The SDK
+[builder](copy-callback-v2.md) records concrete references, template fields and
+implicit outputs. Reference values are separated from settings into the private
+plan. The exporter resolves them and creates portable resources/bindings; the
+callback response itself must never be published as the template.
 
 `ValidateCopySettings` receives target project, pinned version, block key and
-restored settings. It returns `ValidationResult`. The SDK checks consistency:
+restored settings with `protocolVersion: 2`. It returns `ValidationResult`. The SDK checks consistency:
 any error issue means `blocked`, otherwise a review issue means `needsReview`,
 otherwise `passed`. Empty issues are `[]`, not null. Domain incompatibility is
 a successful HTTP 200 result and is not retried as a transport failure.
@@ -85,7 +88,7 @@ same validation used on the platform side; the latter binds a response to the
 original request. No callbacks, requests or resource writes happen in these
 pure functions. Existing `HandleVariableValues` filters remain compatible.
 
-## Catalog and source checks (v0.29.0)
+## Catalog and source checks
 
 `Catalog.StartSyncWithObserver(ctx, manifest, observer)` retains startup retry and
 logging behavior and reports the successful SyncResult once. The observer must
