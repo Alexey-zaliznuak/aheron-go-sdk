@@ -59,16 +59,35 @@ func TestDeferredMappingCarriesNoIdentity(t *testing.T) {
 	}
 }
 
-const validRules = `{"version":1,"mode":"declared","validation":{"mode":"integration"},"settings":{"kind":"object","unknownFields":"reject","fields":{"channel":{"kind":"reference","resource":{"kind":"integrationResource","sourceKey":"channels"},"readAs":"value","writeAs":"value"},"text":{"kind":"template","dialect":"aheronVarsV1"}}}}`
+const validRules = `{"version":2,"mode":"callback"}`
 
 func TestCopyRulesRejectInvalidOrAmbiguousContracts(t *testing.T) {
 	if _, err := ParseCopyRules([]byte(validRules)); err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{`{}`, `{"version":1,"mode":"literal"}`, strings.Replace(validRules, `"version":1`, `"version":2`, 1), strings.Replace(validRules, `"fields":{`, `"resourceType":"channel","fields":{`, 1), strings.Replace(validRules, `"readAs":"value"`, `"readAs":"id"`, 1), strings.Replace(validRules, `"writeAs":"value"`, `"writeAs":"value","empty":"bindDefault"`, 1), strings.Replace(validRules, `"kind":"template"`, `"kind":"template","valueType":"string"`, 1)} {
+	for _, raw := range []string{
+		`{}`, `{"version":1,"mode":"literal","validation":{"mode":"basic"}}`,
+		`{"version":1,"mode":"declared","validation":{"mode":"integration"},"settings":{"kind":"object","fields":{},"unknownFields":"reject"}}`,
+		`{"version":1,"mode":"unsupported","reason":"adapter missing"}`,
+		`{"version":2,"mode":"callback","settings":{}}`,
+		`{"version":2,"version":2,"mode":"callback"}`, `{"version":3,"mode":"callback"}`,
+	} {
 		if _, err := ParseCopyRules([]byte(raw)); err == nil {
-			t.Errorf("accepted invalid rules: %s", raw)
+			t.Errorf("accepted invalid integration contract: %s", raw)
 		}
+	}
+}
+
+func TestNativeRulesStaySeparateFromIntegrationContract(t *testing.T) {
+	raw := []byte(`{"version":1,"mode":"declared","validation":{"mode":"basic"},"settings":{"kind":"object","unknownFields":"reject","fields":{"variableId":{"kind":"reference","resource":{"kind":"subjectVariable"},"readAs":"id","writeAs":"id"}}}}`)
+	if _, err := ParseNativeCopyRules(raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseCopyRules(raw); err == nil {
+		t.Fatal("accepted native rules as integration manifest")
+	}
+	if _, err := ParseNativeCopyRules([]byte(validRules)); err == nil {
+		t.Fatal("accepted callback manifest as native rules")
 	}
 }
 
@@ -85,8 +104,8 @@ func TestDeclarationDependenciesAndVersionCapabilities(t *testing.T) {
 	if err := ValidateDeclaration(sources, rules, "lookup", ""); err == nil {
 		t.Fatal("accepted missing required validator")
 	}
-	if err := ValidateDeclaration(nil, rules, "lookup", "validate"); err == nil {
-		t.Fatal("accepted unknown source")
+	if err := ValidateDeclaration(nil, rules, "lookup", "validate"); err != nil {
+		t.Fatal("callback without resource dependencies should be valid", err)
 	}
 	s := sources["channels"]
 	s.Parameters = map[string]SourceParameter{"parent": {Required: true, SourceKey: "channels"}}

@@ -37,7 +37,7 @@ func TestCopyHandlersSignedRoundTrip(t *testing.T) {
 		if req.SchemeID != "scheme" {
 			t.Fatal("lost source scheme")
 		}
-		return schemetransfer.PrepareCopyResponse{Settings: json.RawMessage(`{"channel":"explicit"}`), Issues: []schemetransfer.Issue{}}, nil
+		return schemetransfer.NewCopyBuilder(map[string]any{"channel": "explicit"}).Resource("/channel", "channels").Build()
 	})
 	validate := v.HandleValidateCopySettings(supportedCopyVersion, func(context.Context, schemetransfer.ValidateCopySettingsRequest) (schemetransfer.ValidationResult, error) {
 		return schemetransfer.ValidationResult{Status: "blocked", Issues: []schemetransfer.Issue{{Severity: "error", Code: "channelIncompatible", Path: "/channel", Message: "Channel does not support these buttons"}}}, nil
@@ -50,8 +50,8 @@ func TestCopyHandlersSignedRoundTrip(t *testing.T) {
 		{"search", lookup, `{"mode":"search","projectId":"project","integrationVersion":7,"sourceKey":"channels","parameters":{"account":"account-value"},"limit":1}`, `"nativeId":42`},
 		{"resolve", lookup, `{"mode":"resolve","projectId":"project","integrationVersion":7,"sourceKey":"channels","parameters":{"account":"account-value"},"ids":["identity"]}`, `"id":"identity"`},
 		{"identify", lookup, `{"mode":"identify","projectId":"project","integrationVersion":7,"sourceKey":"channels","values":["absent"]}`, `"status":"missing"`},
-		{"prepare", prepare, `{"protocolVersion":1,"projectId":"project","schemeId":"scheme","integrationVersion":7,"blockKey":"send","settings":{}}`, `"channel":"explicit"`},
-		{"validate", validate, `{"protocolVersion":1,"projectId":"project","integrationVersion":7,"blockKey":"send","settings":{}}`, `"status":"blocked"`},
+		{"prepare", prepare, `{"protocolVersion":2,"projectId":"project","schemeId":"scheme","integrationVersion":7,"blockKey":"send","settings":{}}`, `"value":"explicit"`},
+		{"validate", validate, `{"protocolVersion":2,"projectId":"project","integrationVersion":7,"blockKey":"send","settings":{}}`, `"status":"blocked"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := serveVariableValues(t, tc.handler, priv, kid, []byte(tc.body))
@@ -128,5 +128,34 @@ func TestCopyHandlersDoNotExposeCallbackErrorsOrInvalidResponses(t *testing.T) {
 				t.Fatalf("%d %s", rec.Code, rec.Body)
 			}
 		})
+	}
+}
+
+func TestCopyHandlersRejectRetiredProtocolBeforeDomainCode(t *testing.T) {
+	v, priv, kid := newVariableValuesVerifier(t)
+	calls := 0
+	guard := func(context.Context, int) error { calls++; return nil }
+	prepare := v.HandlePrepareCopy(guard, func(context.Context, schemetransfer.PrepareCopyRequest) (schemetransfer.PrepareCopyResponse, error) {
+		calls++
+		return schemetransfer.NewCopyBuilder(map[string]any{}).Build()
+	})
+	validate := v.HandleValidateCopySettings(guard, func(context.Context, schemetransfer.ValidateCopySettingsRequest) (schemetransfer.ValidationResult, error) {
+		calls++
+		return schemetransfer.ValidationResult{Status: "passed", Issues: []schemetransfer.Issue{}}, nil
+	})
+	for _, tc := range []struct {
+		handler http.Handler
+		body    string
+	}{
+		{prepare, `{"protocolVersion":1,"projectId":"p","schemeId":"s","integrationVersion":7,"blockKey":"send","settings":{}}`},
+		{validate, `{"protocolVersion":1,"projectId":"p","integrationVersion":7,"blockKey":"send","settings":{}}`},
+	} {
+		rec := serveVariableValues(t, tc.handler, priv, kid, []byte(tc.body))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("retired protocol: %d", rec.Code)
+		}
+	}
+	if calls != 0 {
+		t.Fatal("retired protocol reached version guard or domain code")
 	}
 }

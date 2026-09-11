@@ -43,7 +43,7 @@ func (r PrepareCopyResponse) ValidateFor(req PrepareCopyRequest) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
-	if (req.ProtocolVersion == CallbackVersion) != (r.ProtocolVersion == CallbackVersion) {
+	if req.ProtocolVersion != r.ProtocolVersion {
 		return invalid("copyProtocolMismatch", "/protocolVersion")
 	}
 	return nil
@@ -55,9 +55,6 @@ func (r PrepareCopyResponse) ValidateFor(req PrepareCopyRequest) error {
 func (r PrepareCopyResponse) HydratedSettings() (json.RawMessage, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
-	}
-	if r.Plan == nil {
-		return append(json.RawMessage(nil), r.Settings...), nil
 	}
 	v, _ := DecodeJSON(r.Settings)
 	for _, ref := range r.Plan.References {
@@ -71,7 +68,7 @@ func (r PrepareCopyResponse) HydratedSettings() (json.RawMessage, error) {
 
 func (r PrepareCopyResponse) validatePlan() error {
 	if r.Plan == nil {
-		return nil
+		return invalid("copyPlanRequired", "/plan")
 	}
 	v, err := DecodeJSON(r.Settings)
 	if err != nil {
@@ -131,12 +128,33 @@ func (r PrepareCopyResponse) validatePlan() error {
 // ValidateSources checks dynamic references against the pinned source catalog,
 // including constraints. Resource ownership is still checked by identify/resolve.
 func (p CopyPlan) ValidateSources(sources map[string]ResourceSource) error {
-	fields := map[string]Rule{}
-	for i, ref := range p.References {
-		fields[strconv.Itoa(i)] = ref.Rule()
+	schemas, err := validateResourceSources(sources)
+	if err != nil {
+		return err
 	}
-	rules := &CopyRules{Version: 1, Mode: "declared", Settings: &Rule{Kind: "object", UnknownFields: "reject", Fields: fields}, Validation: &Validation{Mode: "integration"}}
-	return ValidateDeclaration(sources, map[string]*CopyRules{"prepared": rules}, "declared", "declared")
+	for _, ref := range p.References {
+		if ref.Resource.Kind != "integrationResource" {
+			continue
+		}
+		if _, ok := sources[ref.Resource.SourceKey]; !ok {
+			return invalid("unknownSource", ref.Path)
+		}
+		if len(ref.Constraints) == 0 {
+			continue
+		}
+		schema := schemas[ref.Resource.SourceKey]
+		if schema == nil {
+			return invalid("constraintsSchemaRequired", ref.Path)
+		}
+		value, err := DecodeJSON(ref.Constraints)
+		if err != nil {
+			return err
+		}
+		if err := schema.Validate(value); err != nil {
+			return invalid("invalidResourceConstraints", ref.Path)
+		}
+	}
+	return nil
 }
 
 // copyPointer accepts only existing, canonical JSON Pointers. It cannot append

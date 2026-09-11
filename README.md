@@ -723,3 +723,15 @@ lifecycle that must be implemented before advertising physical file copying.
 
 Private import plans require authorization, revision/digest, expiration and
 lifecycle checks in their owning service; schema validation alone grants none.
+
+### Integration callback protocol and native rules
+
+SDK v0.32.0 accepts only integration copy protocol 2. `CopyRules` contains only
+`version` and `mode`; prepare responses always contain `protocolVersion` and
+`plan`. Protocol 1 requests and static integration declarations are rejected.
+Platform-owned native descriptors use the distinct `NativeCopyRules` type and
+`ParseNativeCopyRules`; their version is independent of integration callbacks.
+
+For networks without working IPv6 TLS, SDK publication tasks accept
+`GIT_NETWORK_FLAGS=--ipv4`, for example `task release:minor GIT_NETWORK_FLAGS=--ipv4`.
+Certificate verification remains enabled.

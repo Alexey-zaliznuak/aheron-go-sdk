@@ -7,7 +7,7 @@ import (
 )
 
 func TestCopyBuilderPreservesLiteralTextTypesAndListShape(t *testing.T) {
-	settings := json.RawMessage(`{"channelId":"private-channel","fileIds":["f2","f1","f2"],"text":"Hello {{lead.name}}","button":"{{literal}}","large":9007199254740993,"a/b~c":"value","saveTo":"answer"}`)
+	settings := json.RawMessage(`{"channelId":"private-channel","fileIds":["f2","f1","f2"],"text":"Hello {{subject.name}}","button":"{{literal}}","large":9007199254740993,"a/b~c":"value","saveTo":"answer"}`)
 	result, err := NewCopyBuilder(settings).Resource("/channelId", "channels").ResourceList("/fileIds", "files").Template("/text").SubjectVariable("/saveTo", "string", "write").Resource("/a~1b~0c", "channels").Build()
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestCopyProtocolCannotSilentlyDowngrade(t *testing.T) {
 		rawReq, _ := json.Marshal(req)
 		for i, result := range []PrepareCopyResponse{v1, v2} {
 			raw, _ := json.Marshal(result)
-			if err := ValidateCallbackResponse(PrepareCopy, rawReq, raw); (err == nil) != (i+1 == version) {
+			if err := ValidateCallbackResponse(PrepareCopy, rawReq, raw); (err == nil) != (version == CallbackVersion && i == 1) {
 				t.Fatalf("version %d, response %d: %v", version, i+1, err)
 			}
 		}

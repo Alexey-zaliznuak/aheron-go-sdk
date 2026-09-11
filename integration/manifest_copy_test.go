@@ -7,7 +7,7 @@ import (
 )
 
 func TestManifestCopyContractsResolveAndKeepVersionFields(t *testing.T) {
-	r := &schemetransfer.CopyRules{Version: 1, Mode: "literal", Validation: &schemetransfer.Validation{Mode: "integration"}}
+	r := schemetransfer.CallbackCopyRules()
 	m := Manifest{ResourceValuesPath: "/resources", PrepareCopyPath: "/copy/prepare", ValidateCopySettingsPath: "/copy/validate", ResourceSources: map[string]schemetransfer.ResourceSource{"channels": {ValueType: "string", IdentityScope: "project", Supports: []string{"search", "resolve"}}}, Blocks: []Block{{Key: "send", Name: "Send", Kind: KindAction, CopyRules: r}}}
 	body, err := m.resolve("https://messengers.example")
 	if err != nil {

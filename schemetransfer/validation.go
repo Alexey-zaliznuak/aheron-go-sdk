@@ -199,8 +199,20 @@ func ParseCopyRules(raw []byte) (CopyRules, error) {
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return CopyRules{}, invalid("invalidContract", "")
 	}
+	return out, nil
+}
+
+// ParseNativeCopyRules validates built-in platform rules, never integration declarations.
+func ParseNativeCopyRules(raw []byte) (NativeCopyRules, error) {
+	var out NativeCopyRules
+	if err := Validate("nativeCopyRules", raw); err != nil {
+		return out, err
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return NativeCopyRules{}, invalid("invalidContract", "")
+	}
 	if err := validateRuleSemantics(out.Settings, ""); err != nil {
-		return CopyRules{}, err
+		return NativeCopyRules{}, err
 	}
 	return out, nil
 }
@@ -241,14 +253,39 @@ func validateRuleSemantics(r *Rule, path string) error {
 // ValidateDeclaration checks all links within one immutable integration version.
 // It never follows a URL; external $refs in constraintsSchema are rejected.
 func ValidateDeclaration(sources map[string]ResourceSource, rules map[string]*CopyRules, resourceValuesURL, validateURL string) error {
-	if sources == nil {
-		sources = map[string]ResourceSource{}
-	}
-	if err := validateTyped("resourceSources", sources); err != nil {
+	if _, err := validateResourceSources(sources); err != nil {
 		return err
 	}
 	if len(sources) > 0 && resourceValuesURL == "" {
 		return invalid("resourceValuesEndpointRequired", "/resourceValuesUrl")
+	}
+	for _, key := range sortedKeys(rules) {
+		rule := rules[key]
+		if rule == nil {
+			continue
+		}
+		raw, err := json.Marshal(rule)
+		if err != nil {
+			return invalid("invalidContract", Pointer("/blocks", key))
+		}
+		if _, err := ParseCopyRules(raw); err != nil {
+			return err
+		}
+		if validateURL == "" {
+			return invalid("validatorEndpointRequired", Pointer("/blocks", key))
+		}
+	}
+	return nil
+}
+
+// Catalog graph and constraints are shared by manifest validation and concrete
+// callback plans. No static integration settings tree is synthesized here.
+func validateResourceSources(sources map[string]ResourceSource) (map[string]*jsonschema.Schema, error) {
+	if sources == nil {
+		sources = map[string]ResourceSource{}
+	}
+	if err := validateTyped("resourceSources", sources); err != nil {
+		return nil, err
 	}
 	state := map[string]int{}
 	constraintSchemas := map[string]*jsonschema.Schema{}
@@ -301,64 +338,10 @@ func ValidateDeclaration(sources map[string]ResourceSource, rules map[string]*Co
 	}
 	for _, k := range sortedKeys(sources) {
 		if err := visit(k); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	for _, k := range sortedKeys(rules) {
-		r := rules[k]
-		if r == nil {
-			continue
-		}
-		raw, err := json.Marshal(r)
-		if err != nil {
-			return invalid("invalidContract", Pointer("/blocks", k))
-		}
-		parsed, err := ParseCopyRules(raw)
-		if err != nil {
-			return err
-		}
-		if parsed.RequiresIntegrationValidation() && validateURL == "" {
-			return invalid("validatorEndpointRequired", Pointer("/blocks", k))
-		}
-		var walk func(*Rule) error
-		walk = func(f *Rule) error {
-			if f == nil {
-				return nil
-			}
-			if f.Resource != nil && f.Resource.Kind == "integrationResource" {
-				if _, ok := sources[f.Resource.SourceKey]; !ok {
-					return invalid("unknownSource", Pointer("/blocks", k))
-				}
-				if len(f.Constraints) > 0 {
-					schema := constraintSchemas[f.Resource.SourceKey]
-					if schema == nil {
-						return invalid("constraintsSchemaRequired", Pointer("/blocks", k))
-					}
-					v, err := DecodeJSON(f.Constraints)
-					if err != nil {
-						return err
-					}
-					if err := schema.Validate(v); err != nil {
-						return invalid("invalidResourceConstraints", Pointer("/blocks", k))
-					}
-				}
-			}
-			for _, key := range sortedKeys(f.Fields) {
-				v := f.Fields[key]
-				if err := walk(&v); err != nil {
-					return err
-				}
-			}
-			if err := walk(f.Items); err != nil {
-				return err
-			}
-			return walk(f.Values)
-		}
-		if err := walk(parsed.Settings); err != nil {
-			return err
-		}
-	}
-	return nil
+	return constraintSchemas, nil
 }
 
 func sortedKeys[V any](m map[string]V) []string {

@@ -432,118 +432,20 @@
       ]
     },
     "copyRules": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "version": {
-              "const": 1
-            },
-            "mode": {
-              "const": "unsupported"
-            },
-            "reason": {
-              "type": "string",
-              "minLength": 1
-            },
-            "notes": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          "required": [
-            "version",
-            "mode",
-            "reason"
-          ],
-          "additionalProperties": false
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 2
         },
-        {
-          "type": "object",
-          "properties": {
-            "version": {
-              "const": 1
-            },
-            "mode": {
-              "const": "literal"
-            },
-            "validation": {
-              "$ref": "#/$defs/validation"
-            },
-            "notes": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          "required": [
-            "version",
-            "mode",
-            "validation"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "version": {
-              "const": 1
-            },
-            "mode": {
-              "const": "declared"
-            },
-            "settings": {
-              "allOf": [
-                {
-                  "$ref": "#/$defs/rule"
-                },
-                {
-                  "properties": {
-                    "kind": {
-                      "const": "object"
-                    }
-                  }
-                }
-              ]
-            },
-            "implicitResources": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/implicit"
-              }
-            },
-            "validation": {
-              "$ref": "#/$defs/validation"
-            },
-            "notes": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          "required": [
-            "version",
-            "mode",
-            "settings",
-            "validation"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "version": {
-              "const": 2
-            },
-            "mode": {
-              "const": "callback"
-            }
-          },
-          "required": [
-            "version",
-            "mode"
-          ],
-          "additionalProperties": false
+        "mode": {
+          "const": "callback"
         }
-      ]
+      },
+      "required": [
+        "version",
+        "mode"
+      ],
+      "additionalProperties": false
     },
     "source": {
       "type": "object",
@@ -924,10 +826,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "enum": [
-            1,
-            2
-          ]
+          "const": 2
         },
         "projectId": {
           "type": "string",
@@ -961,63 +860,37 @@
       "additionalProperties": false
     },
     "prepareCopyResponse": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "settings": {
-              "type": "object"
-            },
-            "issues": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/issue"
-              }
-            }
-          },
-          "required": [
-            "settings",
-            "issues"
-          ],
-          "additionalProperties": false
+      "type": "object",
+      "properties": {
+        "settings": {
+          "type": "object"
         },
-        {
-          "type": "object",
-          "properties": {
-            "settings": {
-              "type": "object"
-            },
-            "issues": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/issue"
-              }
-            },
-            "protocolVersion": {
-              "const": 2
-            },
-            "plan": {
-              "$ref": "#/$defs/copyPlan"
-            }
-          },
-          "required": [
-            "settings",
-            "issues",
-            "protocolVersion",
-            "plan"
-          ],
-          "additionalProperties": false
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue"
+          }
+        },
+        "protocolVersion": {
+          "const": 2
+        },
+        "plan": {
+          "$ref": "#/$defs/copyPlan"
         }
-      ]
+      },
+      "required": [
+        "settings",
+        "issues",
+        "protocolVersion",
+        "plan"
+      ],
+      "additionalProperties": false
     },
     "validateCopySettingsRequest": {
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "enum": [
-            1,
-            2
-          ]
+          "const": 2
         },
         "projectId": {
           "type": "string",
@@ -1400,6 +1273,104 @@
         "templates"
       ],
       "additionalProperties": false
+    },
+    "nativeCopyRules": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "mode": {
+              "const": "unsupported"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "notes": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "version",
+            "mode",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "mode": {
+              "const": "literal"
+            },
+            "validation": {
+              "$ref": "#/$defs/validation"
+            },
+            "notes": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "version",
+            "mode",
+            "validation"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "mode": {
+              "const": "declared"
+            },
+            "settings": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/rule"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "object"
+                    }
+                  }
+                }
+              ]
+            },
+            "implicitResources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/implicit"
+              }
+            },
+            "validation": {
+              "$ref": "#/$defs/validation"
+            },
+            "notes": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "version",
+            "mode",
+            "settings",
+            "validation"
+          ],
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }

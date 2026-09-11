@@ -65,7 +65,7 @@ func TestCallbackRuntimeValidatesOriginalBytes(t *testing.T) {
 			t.Fatalf("accepted %s", raw)
 		}
 	}
-	req := []byte(`{"protocolVersion":1,"projectId":"p","integrationVersion":1,"blockKey":"send","settings":{}}`)
+	req := []byte(`{"protocolVersion":2,"projectId":"p","integrationVersion":1,"blockKey":"send","settings":{}}`)
 	for _, raw := range []string{
 		`{"status":"passed","issues":[{"severity":"error","code":"invalid","path":"/channel","message":"Unavailable"}]}`,
 		`{"status":"passed","status":"blocked","issues":[]}`,

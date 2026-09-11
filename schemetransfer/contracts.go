@@ -8,7 +8,7 @@ import "encoding/json"
 const Version = 1
 
 // CallbackVersion is negotiated by the pinned block manifest, never guessed
-// from the shape of its settings. Version 1 remains supported for old catalogs.
+// from the shape of its settings. Only this integration protocol is supported.
 const CallbackVersion = 2
 
 func CallbackCopyRules() *CopyRules { return &CopyRules{Version: CallbackVersion, Mode: "callback"} }
@@ -18,22 +18,14 @@ func (r CopyRules) UsesCallbackPlan() bool {
 }
 
 func (r CopyRules) RequiresIntegrationValidation() bool {
-	return r.UsesCallbackPlan() || (r.Validation != nil && r.Validation.Mode == "integration")
+	return r.UsesCallbackPlan()
 }
 
+// CopyRules opts one integration block into the current callback protocol.
+// Concrete field semantics belong to PrepareCopyResponse.Plan.
 type CopyRules struct {
-	Version           int                `json:"version"`
-	Mode              string             `json:"mode"`
-	Settings          *Rule              `json:"settings,omitempty"`
-	ImplicitResources []ImplicitResource `json:"implicitResources,omitempty"`
-	Validation        *Validation        `json:"validation,omitempty"`
-	Reason            string             `json:"reason,omitempty"`
-	Notes             string             `json:"notes,omitempty"`
-}
-
-type Validation struct {
+	Version int    `json:"version"`
 	Mode    string `json:"mode"`
-	Message string `json:"message,omitempty"`
 }
 
 // Rule is a tagged union. Only the fields defined for Kind are accepted by the
@@ -178,9 +170,9 @@ type PrepareCopyRequest struct {
 	Settings           json.RawMessage `json:"settings"`
 }
 type PrepareCopyResponse struct {
-	ProtocolVersion int             `json:"protocolVersion,omitempty"`
+	ProtocolVersion int             `json:"protocolVersion"`
 	Settings        json.RawMessage `json:"settings"`
-	Plan            *CopyPlan       `json:"plan,omitempty"`
+	Plan            *CopyPlan       `json:"plan"`
 	Issues          []Issue         `json:"issues"`
 }
 type ValidateCopySettingsRequest struct {
