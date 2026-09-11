@@ -17,3 +17,5 @@
   состоянием. Сам SDK не заменяет транзакции получателя и durable worker backend.
 
 Схема следующего шага: `../docs/integration-uninstall-storage-proposal.md`.
+
+- [x] Manifest.InstallationLifecyclePath / installationLifecycleUrl declares the durable v1 receiver independently of legacy callbacks.

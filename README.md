@@ -809,3 +809,14 @@ Platform-owned native descriptors use the distinct `NativeCopyRules` type and
 For networks without working IPv6 TLS, SDK publication tasks accept
 `GIT_NETWORK_FLAGS=--ipv4`, for example `task release:minor GIT_NETWORK_FLAGS=--ipv4`.
 Certificate verification remains enabled.
+
+### Lifecycle catalog declaration
+
+`Manifest.InstallationLifecyclePath` resolves to `installationLifecycleUrl` in
+catalog self-sync. Its presence declares `aheron.installation-lifecycle.v1` with
+durable ordering and credential fencing. It must use a dedicated endpoint,
+distinct from `InstallPath` and `UninstallPath`; omission preserves the legacy
+manifest wire shape. Deploy the catalog field and receiver migrations before
+advertising this capability. The backend pins the HTTPS destination in the
+accepted permission revision; a declaration does not migrate or authorize any
+existing installation by itself.

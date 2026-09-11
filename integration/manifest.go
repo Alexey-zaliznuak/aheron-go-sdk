@@ -145,6 +145,10 @@ type Manifest struct {
 	// removed.
 	InstallPath   string
 	UninstallPath string
+	// InstallationLifecyclePath receives LifecycleRequest using LifecycleProtocol.
+	// Declare only after durable ordering and legacy credential-write guards are
+	// deployed. It must be distinct from both legacy lifecycle endpoints.
+	InstallationLifecyclePath string
 	// ActionPath is the single endpoint every action block of this version is
 	// called on; ActionRequestTemplate is the body template the platform fills
 	// in (placeholders {{context}}, {{actionKey}}, {{blockSettings}}, {{vars}},
@@ -178,22 +182,23 @@ type Manifest struct {
 // absolute URLs; an endpoint the manifest does not offer is omitted, which the
 // platform reads as "clear it".
 type manifestBody struct {
-	ImportCopyFileURL       string                                   `json:"importCopyFileUrl,omitempty"`
-	ResourceValuesURL       string                                   `json:"resourceValuesUrl,omitempty"`
-	PrepareCopyURL          string                                   `json:"prepareCopyUrl,omitempty"`
-	ValidateCopySettingsURL string                                   `json:"validateCopySettingsUrl,omitempty"`
-	ResourceSources         map[string]schemetransfer.ResourceSource `json:"resourceSources,omitempty"`
-	ConsoleURL              string                                   `json:"consoleUrl,omitempty"`
-	ConsolePages            []consolePageBody                        `json:"consolePages,omitempty"`
-	InstallURL              string                                   `json:"installUrl,omitempty"`
-	UninstallURL            string                                   `json:"uninstallUrl,omitempty"`
-	ActionURL               string                                   `json:"actionUrl,omitempty"`
-	ActionRequestTemplate   json.RawMessage                          `json:"actionRequestTemplate,omitempty"`
-	TriggerSyncURL          string                                   `json:"triggerSyncUrl,omitempty"`
-	VariableValuesURL       string                                   `json:"variableValuesUrl,omitempty"`
-	VariableValueSources    map[string]VariableValueSource           `json:"variableValueSources,omitempty"`
-	Blocks                  []blockBody                              `json:"blocks"`
-	Retired                 []string                                 `json:"retired,omitempty"`
+	ImportCopyFileURL        string                                   `json:"importCopyFileUrl,omitempty"`
+	ResourceValuesURL        string                                   `json:"resourceValuesUrl,omitempty"`
+	PrepareCopyURL           string                                   `json:"prepareCopyUrl,omitempty"`
+	ValidateCopySettingsURL  string                                   `json:"validateCopySettingsUrl,omitempty"`
+	ResourceSources          map[string]schemetransfer.ResourceSource `json:"resourceSources,omitempty"`
+	ConsoleURL               string                                   `json:"consoleUrl,omitempty"`
+	ConsolePages             []consolePageBody                        `json:"consolePages,omitempty"`
+	InstallURL               string                                   `json:"installUrl,omitempty"`
+	UninstallURL             string                                   `json:"uninstallUrl,omitempty"`
+	InstallationLifecycleURL string                                   `json:"installationLifecycleUrl,omitempty"`
+	ActionURL                string                                   `json:"actionUrl,omitempty"`
+	ActionRequestTemplate    json.RawMessage                          `json:"actionRequestTemplate,omitempty"`
+	TriggerSyncURL           string                                   `json:"triggerSyncUrl,omitempty"`
+	VariableValuesURL        string                                   `json:"variableValuesUrl,omitempty"`
+	VariableValueSources     map[string]VariableValueSource           `json:"variableValueSources,omitempty"`
+	Blocks                   []blockBody                              `json:"blocks"`
+	Retired                  []string                                 `json:"retired,omitempty"`
 }
 
 // consolePageBody is the wire shape of one resolved console page. Icon bytes
@@ -247,6 +252,13 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 	uninstallURL, err := resolveURL(base, m.UninstallPath, "UninstallPath")
 	if err != nil {
 		return manifestBody{}, err
+	}
+	lifecycleURL, err := resolveURL(base, m.InstallationLifecyclePath, "InstallationLifecyclePath")
+	if err != nil {
+		return manifestBody{}, err
+	}
+	if lifecycleURL != "" && (lifecycleURL == installURL || lifecycleURL == uninstallURL) {
+		return manifestBody{}, fmt.Errorf("integration: lifecycle endpoint must be distinct from legacy endpoints")
 	}
 	actionURL, err := resolveURL(base, m.ActionPath, "ActionPath")
 	if err != nil {
@@ -372,17 +384,18 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 
 	return manifestBody{
 		ImportCopyFileURL: importFileURL, ResourceValuesURL: resourceURL, PrepareCopyURL: prepareURL, ValidateCopySettingsURL: validateURL, ResourceSources: m.ResourceSources,
-		ConsoleURL:            consoleURL,
-		ConsolePages:          pages,
-		InstallURL:            installURL,
-		UninstallURL:          uninstallURL,
-		ActionURL:             actionURL,
-		ActionRequestTemplate: m.ActionRequestTemplate,
-		TriggerSyncURL:        triggerSyncURL,
-		VariableValuesURL:     variableValuesURL,
-		VariableValueSources:  m.VariableValueSources,
-		Blocks:                blocks,
-		Retired:               m.Retired,
+		ConsoleURL:               consoleURL,
+		ConsolePages:             pages,
+		InstallURL:               installURL,
+		UninstallURL:             uninstallURL,
+		InstallationLifecycleURL: lifecycleURL,
+		ActionURL:                actionURL,
+		ActionRequestTemplate:    m.ActionRequestTemplate,
+		TriggerSyncURL:           triggerSyncURL,
+		VariableValuesURL:        variableValuesURL,
+		VariableValueSources:     m.VariableValueSources,
+		Blocks:                   blocks,
+		Retired:                  m.Retired,
 	}, nil
 }
 
