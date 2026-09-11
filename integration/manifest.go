@@ -281,6 +281,9 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 	rules := map[string]*schemetransfer.CopyRules{}
 	for _, b := range m.Blocks {
 		rules[b.Key] = b.CopyRules
+		if b.CopyRules != nil && b.CopyRules.UsesCallbackPlan() && prepareURL == "" {
+			return manifestBody{}, fmt.Errorf("integration: PrepareCopyPath is required for callback copy")
+		}
 	}
 	if err := schemetransfer.ValidateDeclaration(m.ResourceSources, rules, resourceURL, validateURL); err != nil {
 		return manifestBody{}, err

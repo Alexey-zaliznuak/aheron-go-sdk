@@ -691,6 +691,10 @@ audit remain mandatory. Activation requires configuration and normal validation.
 This action does not apply to native variable provisioning or fixed integration
 variable definitions, and introduces no new integration callback.
 
+New integration blocks use compact callback copy rules; see
+[dynamic copy protocol v2](docs/copy-callback-v2.md). The following static rules
+describe v1, which remains supported for pinned old catalogs.
+
 `Block.CopyRules` describes a block's settings; no rules means no transfer support.
 The manifest adds `ResourceSources`, `ResourceValuesPath`, `PrepareCopyPath`, and
 `ValidateCopySettingsPath`. Paths resolve using `PublicBaseURL` and travel in the

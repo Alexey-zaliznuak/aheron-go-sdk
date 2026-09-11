@@ -7,6 +7,20 @@ import "encoding/json"
 
 const Version = 1
 
+// CallbackVersion is negotiated by the pinned block manifest, never guessed
+// from the shape of its settings. Version 1 remains supported for old catalogs.
+const CallbackVersion = 2
+
+func CallbackCopyRules() *CopyRules { return &CopyRules{Version: CallbackVersion, Mode: "callback"} }
+
+func (r CopyRules) UsesCallbackPlan() bool {
+	return r.Version == CallbackVersion && r.Mode == "callback"
+}
+
+func (r CopyRules) RequiresIntegrationValidation() bool {
+	return r.UsesCallbackPlan() || (r.Validation != nil && r.Validation.Mode == "integration")
+}
+
 type CopyRules struct {
 	Version           int                `json:"version"`
 	Mode              string             `json:"mode"`
@@ -164,8 +178,10 @@ type PrepareCopyRequest struct {
 	Settings           json.RawMessage `json:"settings"`
 }
 type PrepareCopyResponse struct {
-	Settings json.RawMessage `json:"settings"`
-	Issues   []Issue         `json:"issues"`
+	ProtocolVersion int             `json:"protocolVersion,omitempty"`
+	Settings        json.RawMessage `json:"settings"`
+	Plan            *CopyPlan       `json:"plan,omitempty"`
+	Issues          []Issue         `json:"issues"`
 }
 type ValidateCopySettingsRequest struct {
 	ProtocolVersion    int             `json:"protocolVersion"`

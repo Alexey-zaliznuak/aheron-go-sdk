@@ -526,6 +526,22 @@
             "validation"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 2
+            },
+            "mode": {
+              "const": "callback"
+            }
+          },
+          "required": [
+            "version",
+            "mode"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -908,7 +924,10 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 1
+          "enum": [
+            1,
+            2
+          ]
         },
         "projectId": {
           "type": "string",
@@ -942,29 +961,63 @@
       "additionalProperties": false
     },
     "prepareCopyResponse": {
-      "type": "object",
-      "properties": {
-        "settings": {
-          "type": "object"
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "settings": {
+              "type": "object"
+            },
+            "issues": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/issue"
+              }
+            }
+          },
+          "required": [
+            "settings",
+            "issues"
+          ],
+          "additionalProperties": false
         },
-        "issues": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/issue"
-          }
+        {
+          "type": "object",
+          "properties": {
+            "settings": {
+              "type": "object"
+            },
+            "issues": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/issue"
+              }
+            },
+            "protocolVersion": {
+              "const": 2
+            },
+            "plan": {
+              "$ref": "#/$defs/copyPlan"
+            }
+          },
+          "required": [
+            "settings",
+            "issues",
+            "protocolVersion",
+            "plan"
+          ],
+          "additionalProperties": false
         }
-      },
-      "required": [
-        "settings",
-        "issues"
-      ],
-      "additionalProperties": false
+      ]
     },
     "validateCopySettingsRequest": {
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 1
+          "enum": [
+            1,
+            2
+          ]
         },
         "projectId": {
           "type": "string",
@@ -1263,6 +1316,88 @@
         "autoPolicy",
         "status",
         "resourceMappings"
+      ],
+      "additionalProperties": false
+    },
+    "copyReference": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/"
+        },
+        "resource": {
+          "$ref": "#/$defs/selector"
+        },
+        "value": {},
+        "readAs": {
+          "enum": [
+            "value",
+            "id",
+            "key"
+          ]
+        },
+        "writeAs": {
+          "enum": [
+            "value",
+            "id",
+            "key"
+          ]
+        },
+        "access": {
+          "enum": [
+            "read",
+            "write",
+            "readWrite"
+          ]
+        },
+        "constraints": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "path",
+        "resource",
+        "value",
+        "readAs",
+        "writeAs"
+      ],
+      "additionalProperties": false
+    },
+    "copyPlan": {
+      "type": "object",
+      "properties": {
+        "references": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "$ref": "#/$defs/copyReference"
+          }
+        },
+        "templates": {
+          "type": "array",
+          "maxItems": 10000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^/"
+          }
+        },
+        "implicitResources": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "$ref": "#/$defs/implicit"
+          }
+        }
+      },
+      "required": [
+        "references",
+        "templates"
       ],
       "additionalProperties": false
     }

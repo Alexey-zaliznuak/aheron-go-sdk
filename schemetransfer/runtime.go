@@ -56,7 +56,14 @@ func ValidateCallbackResponse(operation CopyOperation, request, response []byte)
 		_ = json.Unmarshal(response, &result)
 		return result.ValidateFor(req)
 	case PrepareCopy:
-		return Validate("prepareCopyResponse", response)
+		if err := Validate("prepareCopyResponse", response); err != nil {
+			return err
+		}
+		var req PrepareCopyRequest
+		var result PrepareCopyResponse
+		_ = json.Unmarshal(request, &req)
+		_ = json.Unmarshal(response, &result)
+		return result.ValidateFor(req)
 	case ValidateCopySettings:
 		if err := Validate("validationResult", response); err != nil {
 			return err
@@ -167,8 +174,13 @@ func validateResourceItem(item ResourceItem, path string) error {
 	return nil
 }
 
-func (r PrepareCopyRequest) Validate() error  { return validateTyped("prepareCopyRequest", r) }
-func (r PrepareCopyResponse) Validate() error { return validateTyped("prepareCopyResponse", r) }
+func (r PrepareCopyRequest) Validate() error { return validateTyped("prepareCopyRequest", r) }
+func (r PrepareCopyResponse) Validate() error {
+	if err := validateTyped("prepareCopyResponse", r); err != nil {
+		return err
+	}
+	return r.validatePlan()
+}
 func (r ValidateCopySettingsRequest) Validate() error {
 	return validateTyped("validateCopySettingsRequest", r)
 }

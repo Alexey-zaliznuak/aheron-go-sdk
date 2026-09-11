@@ -317,7 +317,7 @@ func ValidateDeclaration(sources map[string]ResourceSource, rules map[string]*Co
 		if err != nil {
 			return err
 		}
-		if parsed.Validation != nil && parsed.Validation.Mode == "integration" && validateURL == "" {
+		if parsed.RequiresIntegrationValidation() && validateURL == "" {
 			return invalid("validatorEndpointRequired", Pointer("/blocks", k))
 		}
 		var walk func(*Rule) error

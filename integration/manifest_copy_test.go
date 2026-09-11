@@ -21,3 +21,19 @@ func TestManifestCopyContractsResolveAndKeepVersionFields(t *testing.T) {
 		t.Fatal("missing validator accepted")
 	}
 }
+
+func TestCallbackCopyManifestRequiresBothCallbacks(t *testing.T) {
+	m := Manifest{PrepareCopyPath: "/prepare", ValidateCopySettingsPath: "/validate", Blocks: []Block{{Key: "send", Name: "Send", Kind: KindAction, CopyRules: schemetransfer.CallbackCopyRules()}}}
+	if _, err := m.resolve("https://integration.example"); err != nil {
+		t.Fatal(err)
+	}
+	m.PrepareCopyPath = ""
+	if _, err := m.resolve("https://integration.example"); err == nil {
+		t.Fatal("accepted missing prepare callback")
+	}
+	m.PrepareCopyPath = "/prepare"
+	m.ValidateCopySettingsPath = ""
+	if _, err := m.resolve("https://integration.example"); err == nil {
+		t.Fatal("accepted missing validation callback")
+	}
+}
