@@ -111,6 +111,7 @@ type ImplicitResource struct {
 }
 
 type ResourceSource struct {
+	FileImport        *FileImport                `json:"fileImport,omitempty"`
 	ValueType         string                     `json:"valueType"`
 	IdentityScope     string                     `json:"identityScope"`
 	Supports          []string                   `json:"supports"`

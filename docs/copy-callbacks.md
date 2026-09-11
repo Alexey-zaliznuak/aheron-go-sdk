@@ -1,6 +1,6 @@
 # Signed copy callbacks
 
-Register three independent POST handlers on the paths declared in the manifest:
+Register the read-only POST handlers on the paths declared in the manifest:
 
 ```go
 guard := func(ctx context.Context, version int) error {
@@ -75,6 +75,8 @@ After authentication, errors have `{ "code": "...", "error": "safe message" }`:
 - 400 `invalidRequest`: invalid wire body or `ErrCopyInvalidRequest`.
 - 404 `unknownSource` / `unknownBlock`: matching SDK sentinel error.
 - 409 `unsupportedVersion`: `ErrCopyUnsupportedVersion`.
+- 409 `copyConflict`: `ErrCopyConflict` (a file receipt with different input).
+- 404 `resourceNotFound`: `ErrCopyNotFound` (including a deleted file result).
 - 503 `unavailable`: `ErrCopyUnavailable` or unconfigured handler/guard.
 - 500 `callbackFailed` / `invalidResponse`: callback error or invalid response.
 
@@ -105,3 +107,11 @@ resolve parent IDs or check ownership. Callers assemble parent values only after
 resolving their identities through the appropriate source in the target project.
 `ValidateResourceValue` validates returned values, including exact integer types.
 Constraints schemas cannot load external resources.
+
+## File registration
+
+File-capable sources additionally use `HandleImportCopyFile` on
+`Manifest.ImportCopyFilePath`. It verifies the same signature, version guard and
+strict JSON contract, but the domain callback **writes** a target library entry.
+It must persist a receipt and must not execute a block or upload to a messenger.
+See [file markers, receipt behavior and media client](copy-files.md).

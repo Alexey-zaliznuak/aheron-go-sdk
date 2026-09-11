@@ -9,6 +9,7 @@ import (
 type CopyOperation string
 
 const (
+	ImportCopyFile       CopyOperation = "importCopyFile"
 	ResourceValues       CopyOperation = "resourceValues"
 	PrepareCopy          CopyOperation = "prepareCopy"
 	ValidateCopySettings CopyOperation = "validateCopySettings"
@@ -19,6 +20,8 @@ const (
 func ValidateCallbackRequest(operation CopyOperation, raw []byte) error {
 	var definition string
 	switch operation {
+	case ImportCopyFile:
+		definition = "importCopyFileRequest"
 	case ResourceValues:
 		definition = "lookupRequest"
 	case PrepareCopy:
@@ -38,6 +41,15 @@ func ValidateCallbackResponse(operation CopyOperation, request, response []byte)
 		return err
 	}
 	switch operation {
+	case ImportCopyFile:
+		if err := Validate("importCopyFileResponse", response); err != nil {
+			return err
+		}
+		var req ImportCopyFileRequest
+		var result ImportCopyFileResponse
+		_ = json.Unmarshal(request, &req)
+		_ = json.Unmarshal(response, &result)
+		return result.ValidateFor(req)
 	case ResourceValues:
 		var req LookupRequest
 		_ = json.Unmarshal(request, &req)

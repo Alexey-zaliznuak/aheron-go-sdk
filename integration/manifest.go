@@ -159,6 +159,7 @@ type Manifest struct {
 	VariableValuesPath       string
 	VariableValueSources     map[string]VariableValueSource
 	ResourceValuesPath       string
+	ImportCopyFilePath       string
 	PrepareCopyPath          string
 	ValidateCopySettingsPath string
 	ResourceSources          map[string]schemetransfer.ResourceSource
@@ -177,6 +178,7 @@ type Manifest struct {
 // absolute URLs; an endpoint the manifest does not offer is omitted, which the
 // platform reads as "clear it".
 type manifestBody struct {
+	ImportCopyFileURL       string                                   `json:"importCopyFileUrl,omitempty"`
 	ResourceValuesURL       string                                   `json:"resourceValuesUrl,omitempty"`
 	PrepareCopyURL          string                                   `json:"prepareCopyUrl,omitempty"`
 	ValidateCopySettingsURL string                                   `json:"validateCopySettingsUrl,omitempty"`
@@ -278,6 +280,13 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 	if err != nil {
 		return manifestBody{}, err
 	}
+	importFileURL, err := resolveURL(base, m.ImportCopyFilePath, "ImportCopyFilePath")
+	if err != nil {
+		return manifestBody{}, err
+	}
+	if err := schemetransfer.ValidateFileImportDeclaration(m.ResourceSources, importFileURL); err != nil {
+		return manifestBody{}, err
+	}
 	rules := map[string]*schemetransfer.CopyRules{}
 	for _, b := range m.Blocks {
 		rules[b.Key] = b.CopyRules
@@ -362,7 +371,7 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 	}
 
 	return manifestBody{
-		ResourceValuesURL: resourceURL, PrepareCopyURL: prepareURL, ValidateCopySettingsURL: validateURL, ResourceSources: m.ResourceSources,
+		ImportCopyFileURL: importFileURL, ResourceValuesURL: resourceURL, PrepareCopyURL: prepareURL, ValidateCopySettingsURL: validateURL, ResourceSources: m.ResourceSources,
 		ConsoleURL:            consoleURL,
 		ConsolePages:          pages,
 		InstallURL:            installURL,

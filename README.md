@@ -786,8 +786,14 @@ Native definitions and fixed integration-owned outputs cannot be deferred.
 
 Text and list membership are edited after copying in the normal block editor.
 `ResourceList(path, "files")` remaps library references; it does not copy bytes.
-Template-owned asset snapshots and target file registration are a separate storage
-lifecycle that must be implemented before advertising physical file copying.
+`File(path, sourceKey, mediaFileID)` adds a private hosted-file marker to a
+resource occurrence. A file source declares `FileImport.Namespace`, and the
+manifest supplies `ImportCopyFilePath` for signed, idempotent target-library
+registration through `HandleImportCopyFile`. The platform-only `transfermedia`
+client captures and imports media-service snapshots. See the [file-transfer
+contract and rollout](docs/copy-files.md). These SDK APIs require orchestration
+in backend and persistent receipts in the integration before user-facing
+automatic copying can be enabled.
 
 Private import plans require authorization, revision/digest, expiration and
 lifecycle checks in their owning service; schema validation alone grants none.

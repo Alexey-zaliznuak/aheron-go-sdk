@@ -57,5 +57,7 @@ this protocol. Requests and responses must match the negotiated version.
 
 Physical copying of file bytes requires template-owned asset snapshots and target
 integration file registration. `ResourceList(path, "files")` means remapping a
-resource list; it does **not** copy bytes. No `File` helper is advertised until that
-storage lifecycle is implemented. Never publish source storage URLs as substitutes.
+resource list; it does **not** copy bytes. `File(path, sourceKey, mediaFileID)`
+marks a hosted file for the separate [file-transfer protocol](copy-files.md).
+The builder performs no I/O. Deploy platform asset orchestration and integration
+registration before enabling these markers. Never publish source storage URLs.

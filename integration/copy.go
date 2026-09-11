@@ -14,6 +14,8 @@ var (
 	ErrCopyUnknownSource      = errors.New("unknown copy resource source")
 	ErrCopyUnknownBlock       = errors.New("unknown copy block")
 	ErrCopyInvalidRequest     = errors.New("invalid copy callback request")
+	ErrCopyConflict           = errors.New("copy receipt conflict")
+	ErrCopyNotFound           = errors.New("copy resource not found")
 	ErrCopyUnavailable        = errors.New("copy callback unavailable")
 )
 
@@ -144,6 +146,10 @@ func (v *Verifier) copyFailure(w http.ResponseWriter, err error) {
 		status, code, message = http.StatusNotFound, "unknownBlock", "unknown block"
 	case errors.Is(err, ErrCopyInvalidRequest):
 		status, code, message = http.StatusBadRequest, "invalidRequest", "invalid copy request"
+	case errors.Is(err, ErrCopyConflict):
+		status, code, message = http.StatusConflict, "copyConflict", "copy receipt conflict"
+	case errors.Is(err, ErrCopyNotFound):
+		status, code, message = http.StatusNotFound, "resourceNotFound", "copy resource not found"
 	case errors.Is(err, ErrCopyUnavailable):
 		status, code, message = http.StatusServiceUnavailable, "unavailable", "copy callback unavailable"
 	}

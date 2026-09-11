@@ -519,6 +519,9 @@
             "variableKey"
           ],
           "additionalProperties": false
+        },
+        "fileImport": {
+          "$ref": "#/$defs/fileImport"
         }
       },
       "required": [
@@ -1228,6 +1231,9 @@
         },
         "constraints": {
           "type": "object"
+        },
+        "file": {
+          "$ref": "#/$defs/copyFile"
         }
       },
       "required": [
@@ -1371,6 +1377,100 @@
           "additionalProperties": false
         }
       ]
+    },
+    "copyFile": {
+      "type": "object",
+      "properties": {
+        "mediaFileId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "not": {
+            "const": "00000000-0000-0000-0000-000000000000"
+          }
+        }
+      },
+      "required": [
+        "mediaFileId"
+      ],
+      "additionalProperties": false
+    },
+    "fileImport": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+        }
+      },
+      "required": [
+        "namespace"
+      ],
+      "additionalProperties": false
+    },
+    "importCopyFileRequest": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": 2
+        },
+        "projectId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "not": {
+            "const": "00000000-0000-0000-0000-000000000000"
+          }
+        },
+        "integrationVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "importId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "not": {
+            "const": "00000000-0000-0000-0000-000000000000"
+          }
+        },
+        "resourceKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "sourceKey": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "mediaFileId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "not": {
+            "const": "00000000-0000-0000-0000-000000000000"
+          }
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "projectId",
+        "integrationVersion",
+        "importId",
+        "resourceKey",
+        "sourceKey",
+        "mediaFileId"
+      ],
+      "additionalProperties": false
+    },
+    "importCopyFileResponse": {
+      "type": "object",
+      "properties": {
+        "item": {
+          "$ref": "#/$defs/resourceItem"
+        }
+      },
+      "required": [
+        "item"
+      ],
+      "additionalProperties": false
     }
   }
 }

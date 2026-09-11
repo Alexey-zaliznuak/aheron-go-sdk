@@ -299,6 +299,9 @@ func validateResourceSources(sources map[string]ResourceSource) (map[string]*jso
 		}
 		state[k] = 1
 		s := sources[k]
+		if s.FileImport != nil && (s.IdentityScope != "project" || s.ValueType != "string" || len(s.Parameters) != 0 || !contains(s.Supports, "identify")) {
+			return invalid("invalidFileImportSource", Pointer("/resourceSources", k))
+		}
 		hasRequired := false
 		for _, p := range sortedKeys(s.Parameters) {
 			dep := s.Parameters[p]

@@ -20,6 +20,7 @@ type CopyPlan struct {
 // CopyReference moves the source value out of settings, leaving a JSON null at
 // Path. Values must never be exposed as public template resource identities.
 type CopyReference struct {
+	File        *CopyFile        `json:"file,omitempty"`
 	Path        string           `json:"path"`
 	Resource    ResourceSelector `json:"resource"`
 	Value       json.RawMessage  `json:"value"`
@@ -84,6 +85,7 @@ func (r PrepareCopyResponse) validatePlan() error {
 		paths[path] = true
 		return copyPointer(v, path, false, nil)
 	}
+	files := map[string]string{}
 	for _, ref := range r.Plan.References {
 		value, err := checkPath(ref.Path)
 		if err != nil {
@@ -91,6 +93,18 @@ func (r PrepareCopyResponse) validatePlan() error {
 		}
 		if value != nil {
 			return invalid("copyPlaceholderRequired", ref.Path)
+		}
+		if err := validateCopyFile(ref); err != nil {
+			return err
+		}
+		if ref.File != nil {
+			var id string
+			_ = json.Unmarshal(ref.Value, &id)
+			identity, _ := json.Marshal([]string{ref.Resource.SourceKey, id})
+			if old := files[string(identity)]; old != "" && old != ref.File.MediaFileID {
+				return invalid("conflictingCopyFile", ref.Path)
+			}
+			files[string(identity)] = ref.File.MediaFileID
 		}
 		rule := ref.Rule()
 		if err := validateRuleSemantics(&rule, ref.Path); err != nil {
@@ -138,6 +152,9 @@ func (p CopyPlan) ValidateSources(sources map[string]ResourceSource) error {
 		}
 		if _, ok := sources[ref.Resource.SourceKey]; !ok {
 			return invalid("unknownSource", ref.Path)
+		}
+		if ref.File != nil && sources[ref.Resource.SourceKey].FileImport == nil {
+			return invalid("fileImportSourceRequired", ref.Path)
 		}
 		if len(ref.Constraints) == 0 {
 			continue
