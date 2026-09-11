@@ -20,7 +20,7 @@ module github.com/Alexey-zaliznuak/aheron-go-sdk/ydb
 go 1.25.0
 
 require (
-	github.com/Alexey-zaliznuak/aheron-go-sdk v0.18.0
+	github.com/Alexey-zaliznuak/aheron-go-sdk v0.32.0
 	github.com/google/uuid v1.6.0
 	github.com/ydb-platform/ydb-go-genproto v0.0.0-20260810122915-65bfd5c4b705
 	github.com/ydb-platform/ydb-go-sdk/v3 v3.150.1
