@@ -127,6 +127,7 @@ errors, and requires the caller to authorize the owning revision and projects.
 | --- | --- |
 | `Capture(ctx, snapshotID, assetID, CaptureRequest)` | PUT snapshot asset from source project/file |
 | `GetAsset(ctx, snapshotID, assetID)` | GET ready asset metadata |
+| `RetireSnapshot(ctx, snapshotID)` | DELETE snapshot, permanent fence and asynchronous cleanup |
 | `Import(ctx, projectID, importID, resourceKey, ImportRequest)` | PUT target file from snapshot/asset and namespace |
 | `GetImport(ctx, projectID, importID, resourceKey)` | GET current imported file |
 
@@ -137,6 +138,19 @@ not recreated. The client checks returned asset identities and target namespace,
 rejects duplicate/unknown/trailing fields, and never accepts arbitrary source URLs.
 `ErrConflict` can mean a changed request or an incomplete capture/import; callers
 must inspect their durable operation state rather than allocate a new ID.
+
+Snapshot retirement requires the media-service retirement endpoint and migration
+00013. First revoke revision access and persist the retirement intent in backend;
+then retry RetireSnapshot using that same ID until acknowledged. Only an empty
+204 is acknowledgement, not 200/202. The client does not retry by itself or follow
+redirects. Retirement also fences a not-yet-created snapshot. Never reuse this ID.
+New/pending captures and imports are blocked; completed target files remain.
+Success means durable acceptance, not that every S3 object has already disappeared.
+Media inventory recovers COPYs finishing after the first deletion.
+
+The client does not decide retention, revoke links, store retirement intents or
+implement backend recovery. A 409 during capture/import can also mean retirement;
+do not bypass it by creating another operation.
 
 ## Rollout and unfinished orchestration
 

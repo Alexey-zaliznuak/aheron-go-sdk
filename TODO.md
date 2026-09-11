@@ -1,5 +1,10 @@
 # SDK tasks
 
+## Template files
+
+- [x] Platform-only RetireSnapshot: stable DELETE, explicit 204, no redirects or automatic retries.
+- [ ] Backend must persist and retry snapshot retirement after revoking revision access.
+
 ## Installation lifecycle
 
 - [x] Отдельный signed lifecycle protocol с installationId, постоянным sequence,

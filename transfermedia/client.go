@@ -113,6 +113,18 @@ func (c *Client) GetAsset(ctx context.Context, snapshotID, assetID string) (Asse
 	return c.asset(ctx, http.MethodGet, path, snapshotID, assetID, nil)
 }
 
+// RetireSnapshot permanently fences a snapshot and accepts durable asynchronous
+// cleanup. The owner must revoke revision access before calling. Reuse this
+// snapshot ID on retries; never recycle it for a new revision. Completed imports
+// remain independent project files. Success does not mean physical deletion has
+// finished, and this method does not authorize the caller or revoke a share link.
+func (c *Client) RetireSnapshot(ctx context.Context, snapshotID string) error {
+	if !validUUID(snapshotID) {
+		return ErrInvalidRequest
+	}
+	return c.do(ctx, http.MethodDelete, "/internal/template-file-snapshots/"+snapshotID, nil, nil)
+}
+
 func (c *Client) asset(ctx context.Context, method, path, snapshotID, assetID string, input any) (Asset, error) {
 	var out Asset
 	if err := c.do(ctx, method, path, input, &out); err != nil {
@@ -199,7 +211,19 @@ func (c *Client) do(ctx context.Context, method, path string, input, out any) er
 	}
 	defer response.Body.Close()
 	switch response.StatusCode {
+	case http.StatusNoContent:
+		if out != nil {
+			return ErrUnavailable
+		}
+		raw, err := io.ReadAll(io.LimitReader(response.Body, 1))
+		if err != nil || len(raw) != 0 {
+			return ErrUnavailable
+		}
+		return nil
 	case http.StatusOK:
+		if out == nil {
+			return ErrUnavailable
+		}
 	case 400, 413, 422:
 		return ErrInvalidRequest
 	case 404:

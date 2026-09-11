@@ -795,6 +795,11 @@ contract and rollout](docs/copy-files.md). These SDK APIs require orchestration
 in backend and persistent receipts in the integration before user-facing
 automatic copying can be enabled.
 
+`transfermedia.Client.RetireSnapshot` installs a permanent snapshot fence and
+accepts asynchronous cleanup. Revoke access to the owning revision first and
+retain the snapshot ID for retries. Completed target files are unaffected.
+Requires media-service's snapshot retirement endpoint and migration 00013.
+
 Private import plans require authorization, revision/digest, expiration and
 lifecycle checks in their owning service; schema validation alone grants none.
 
