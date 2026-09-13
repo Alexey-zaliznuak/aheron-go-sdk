@@ -12,10 +12,11 @@ import (
 )
 
 // CRMClient reads and writes subject (lead) data in the platform CRM, authorized
-// by the project API key granted to the integration at install time. Paths are
+// by CRMOAuth when configured, or the legacy project API key otherwise. Paths are
 // relative to the configured CRMURL, which already carries the "/api/crm" gateway
 // prefix.
 type CRMClient struct {
+	oauth  *crmOAuth
 	http   *httpclient.Client
 	apiKey string
 }
@@ -23,6 +24,8 @@ type CRMClient struct {
 // WithAPIKey returns a copy of the client that authenticates with apiKey instead
 // of the key configured on the parent Client. It shares the underlying HTTP
 // transport, so it is cheap to derive per request or per project.
+// If CRMOAuth is configured, its installation binding takes precedence and this
+// method does not disable it. Construct a separate client for a legacy key.
 //
 // Use it when a single integration process acts on behalf of many projects, each
 // with its own project API key (for example one delivered per project on
@@ -132,13 +135,13 @@ func (c *CRMClient) UpsertSubject(ctx context.Context, projectID string, p Upser
 	if err != nil {
 		return UpsertSubjectResult{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return UpsertSubjectResult{}, err
 	}
 	var out UpsertSubjectResult
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return UpsertSubjectResult{}, fmt.Errorf("integration: decode upsert response: %w", err)
+		return UpsertSubjectResult{}, c.decodeError("upsert response", err)
 	}
 	return out, nil
 }
@@ -152,13 +155,13 @@ func (c *CRMClient) GetSubject(ctx context.Context, projectID, subjectID string)
 	if err != nil {
 		return Subject{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return Subject{}, err
 	}
 	var out Subject
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return Subject{}, fmt.Errorf("integration: decode subject: %w", err)
+		return Subject{}, c.decodeError("subject", err)
 	}
 	return out, nil
 }
@@ -173,13 +176,13 @@ func (c *CRMClient) ListSubjectVariables(ctx context.Context, projectID, subject
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	var out []SubjectVariableValue
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return nil, fmt.Errorf("integration: decode variable values: %w", err)
+		return nil, c.decodeError("variable values", err)
 	}
 	return out, nil
 }
@@ -217,14 +220,14 @@ func (c *CRMClient) SetSubjectVariables(ctx context.Context, projectID, subjectI
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	var out []SubjectVariableValue
 	if len(resp.Body) > 0 {
 		if err := json.Unmarshal(resp.Body, &out); err != nil {
-			return nil, fmt.Errorf("integration: decode variable values: %w", err)
+			return nil, c.decodeError("variable values", err)
 		}
 	}
 	return out, nil
@@ -278,13 +281,13 @@ func (c *CRMClient) ListVariableDefinitions(ctx context.Context, projectID strin
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	var out []VariableDefinition
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return nil, fmt.Errorf("integration: decode variable definitions: %w", err)
+		return nil, c.decodeError("variable definitions", err)
 	}
 	return out, nil
 }
@@ -298,13 +301,13 @@ func (c *CRMClient) GetVariableDefinition(ctx context.Context, projectID, defini
 	if err != nil {
 		return VariableDefinition{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return VariableDefinition{}, err
 	}
 	var out VariableDefinition
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return VariableDefinition{}, fmt.Errorf("integration: decode variable definition: %w", err)
+		return VariableDefinition{}, c.decodeError("variable definition", err)
 	}
 	return out, nil
 }
@@ -381,13 +384,13 @@ func (c *CRMClient) CreateVariableDefinition(ctx context.Context, projectID stri
 	if err != nil {
 		return VariableDefinition{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return VariableDefinition{}, err
 	}
 	var out VariableDefinition
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return VariableDefinition{}, fmt.Errorf("integration: decode variable definition: %w", err)
+		return VariableDefinition{}, c.decodeError("variable definition", err)
 	}
 	return out, nil
 }
@@ -419,13 +422,13 @@ func (c *CRMClient) UpdateVariableDefinition(ctx context.Context, projectID, def
 	if err != nil {
 		return VariableDefinition{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return VariableDefinition{}, err
 	}
 	var out VariableDefinition
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return VariableDefinition{}, fmt.Errorf("integration: decode variable definition: %w", err)
+		return VariableDefinition{}, c.decodeError("variable definition", err)
 	}
 	return out, nil
 }
@@ -440,7 +443,7 @@ func (c *CRMClient) DeleteVariableDefinition(ctx context.Context, projectID, def
 	if err != nil {
 		return err
 	}
-	_, err = c.http.Do(ctx, req)
+	_, err = c.do(ctx, req)
 	return err
 }
 
@@ -502,13 +505,13 @@ func (c *CRMClient) CreateIntegrationVariableDefinition(ctx context.Context, pro
 	if err != nil {
 		return VariableDefinition{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return VariableDefinition{}, err
 	}
 	var out VariableDefinition
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return VariableDefinition{}, fmt.Errorf("integration: decode variable definition: %w", err)
+		return VariableDefinition{}, c.decodeError("variable definition", err)
 	}
 	return out, nil
 }
@@ -569,13 +572,13 @@ func (c *CRMClient) ListTags(ctx context.Context, projectID string) ([]Tag, erro
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	var out []Tag
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return nil, fmt.Errorf("integration: decode tags: %w", err)
+		return nil, c.decodeError("tags", err)
 	}
 	return out, nil
 }
@@ -596,13 +599,13 @@ func (c *CRMClient) CreateTag(ctx context.Context, projectID string, p CreateTag
 	if err != nil {
 		return Tag{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return Tag{}, err
 	}
 	var out Tag
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return Tag{}, fmt.Errorf("integration: decode tag: %w", err)
+		return Tag{}, c.decodeError("tag", err)
 	}
 	return out, nil
 }
@@ -620,13 +623,13 @@ func (c *CRMClient) UpdateTag(ctx context.Context, projectID, tagID string, p Up
 	if err != nil {
 		return Tag{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return Tag{}, err
 	}
 	var out Tag
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return Tag{}, fmt.Errorf("integration: decode tag: %w", err)
+		return Tag{}, c.decodeError("tag", err)
 	}
 	return out, nil
 }
@@ -640,11 +643,14 @@ func (c *CRMClient) DeleteTag(ctx context.Context, projectID, tagID string) erro
 	if err != nil {
 		return err
 	}
-	_, err = c.http.Do(ctx, req)
+	_, err = c.do(ctx, req)
 	return err
 }
 
 func (c *CRMClient) bearerRequest(method, path string, query map[string]string, body []byte, idempotent bool) (httpclient.Request, error) {
+	if c.oauth != nil {
+		return httpclient.Request{Method: method, Path: path, Query: query, Body: body}, nil
+	}
 	if c.apiKey == "" {
 		return httpclient.Request{}, errNoAPIKey
 	}
@@ -656,6 +662,20 @@ func (c *CRMClient) bearerRequest(method, path string, query map[string]string, 
 		Body:       body,
 		Idempotent: idempotent,
 	}, nil
+}
+
+func (c *CRMClient) do(ctx context.Context, req httpclient.Request) (*httpclient.Response, error) {
+	if c.oauth != nil {
+		return c.oauth.do(ctx, req)
+	}
+	return c.http.Do(ctx, req)
+}
+
+func (c *CRMClient) decodeError(operation string, err error) error {
+	if c.oauth != nil {
+		return errCRMOAuthResponse
+	}
+	return fmt.Errorf("integration: decode %s: %w", operation, err)
 }
 
 func fieldsToWire(fields []Field) ([]fieldWire, error) {

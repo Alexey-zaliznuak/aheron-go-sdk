@@ -17,6 +17,7 @@ package integration
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/Alexey-zaliznuak/aheron-go-sdk/integrationoauth"
 	"io/fs"
 	"path"
 	"strings"
@@ -149,6 +150,9 @@ type Manifest struct {
 	// Declare only after durable ordering and legacy credential-write guards are
 	// deployed. It must be distinct from both legacy lifecycle endpoints.
 	InstallationLifecyclePath string
+	// OAuthMigrationPath is a separate signed proof endpoint. Declare only after
+	// current-credential lookup and tombstone/lifetime checks are deployed.
+	OAuthMigrationPath string
 	// ActionPath is the single endpoint every action block of this version is
 	// called on; ActionRequestTemplate is the body template the platform fills
 	// in (placeholders {{context}}, {{actionKey}}, {{blockSettings}}, {{vars}},
@@ -192,6 +196,7 @@ type manifestBody struct {
 	InstallURL               string                                   `json:"installUrl,omitempty"`
 	UninstallURL             string                                   `json:"uninstallUrl,omitempty"`
 	InstallationLifecycleURL string                                   `json:"installationLifecycleUrl,omitempty"`
+	OAuthMigrationURL        string                                   `json:"oauthMigrationUrl,omitempty"`
 	ActionURL                string                                   `json:"actionUrl,omitempty"`
 	ActionRequestTemplate    json.RawMessage                          `json:"actionRequestTemplate,omitempty"`
 	TriggerSyncURL           string                                   `json:"triggerSyncUrl,omitempty"`
@@ -259,6 +264,13 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 	}
 	if lifecycleURL != "" && (lifecycleURL == installURL || lifecycleURL == uninstallURL) {
 		return manifestBody{}, fmt.Errorf("integration: lifecycle endpoint must be distinct from legacy endpoints")
+	}
+	migrationURL, err := resolveURL(base, m.OAuthMigrationPath, "OAuthMigrationPath")
+	if err != nil {
+		return manifestBody{}, err
+	}
+	if err := integrationoauth.ValidateMigrationEndpoint(migrationURL, installURL, uninstallURL, lifecycleURL); err != nil {
+		return manifestBody{}, err
 	}
 	actionURL, err := resolveURL(base, m.ActionPath, "ActionPath")
 	if err != nil {
@@ -389,6 +401,7 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 		InstallURL:               installURL,
 		UninstallURL:             uninstallURL,
 		InstallationLifecycleURL: lifecycleURL,
+		OAuthMigrationURL:        migrationURL,
 		ActionURL:                actionURL,
 		ActionRequestTemplate:    m.ActionRequestTemplate,
 		TriggerSyncURL:           triggerSyncURL,

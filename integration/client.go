@@ -51,9 +51,9 @@ const (
 // keys and the console view-token signing keys are published here.
 const DefaultJWKSURL = "https://aheron.pro/.well-known/aheron-integration-jwks.json"
 
-// Config configures a Client. IntegrationID and PrivateKey are required for the
-// signed platform endpoints (Steps, Triggers); APIKey is required only for the
-// CRM client. Zero-valued optional fields fall back to sensible defaults.
+// Config configures a Client. Steps/Triggers use ExecutionOAuth and CRM uses
+// CRMOAuth when configured. Files uses FilesOAuth. Other calls retain their signature/API-key
+// requirements. Optional fields have defaults.
 type Config struct {
 	// IntegrationID is this integration's platform id (a uuid). It is sent in the
 	// X-Integration-Id header of signed callbacks.
@@ -64,6 +64,19 @@ type Config struct {
 	// APIKey is the project API key (ahr_proj_...) granted to the integration at
 	// install time. It authenticates CRM data calls. Optional.
 	APIKey string
+
+	// ExecutionOAuth authenticates Steps and Triggers with installation-scoped
+	// OAuth. When configured, these methods never fall back to signed requests.
+	ExecutionOAuth *ExecutionOAuthConfig
+	// CRMOAuth authenticates every CRM method for one project installation.
+	CRMOAuth *CRMOAuthConfig
+	// FilesOAuth authenticates all Files methods for one project installation.
+	FilesOAuth *FilesOAuthConfig
+	// LinksOAuth authenticates project links, excluding application callback registration.
+	LinksOAuth *LinksOAuthConfig
+	// ApplicationOAuth authenticates Catalog.Sync and Links.RegisterCallback.
+	// It carries no installation identity and never replaces project permissions.
+	ApplicationOAuth *ApplicationOAuthConfig
 
 	// ExecutionURL is the base URL of the execution-service public API, already
 	// carrying the gateway's "/api/execution" prefix (the signed integration
@@ -105,11 +118,9 @@ type Client struct {
 	Steps *StepsClient
 	// Triggers activates and lists integration triggers.
 	Triggers *TriggersClient
-	// CRM reads and writes subject data with the project API key. It is nil-safe:
-	// calling it without an APIKey configured returns an error.
+	// CRM reads and writes data using CRMOAuth or the legacy project API key.
 	CRM *CRMClient
-	// Files stores and retrieves project media files with the project API key.
-	// It is nil-safe: calling it without an APIKey configured returns an error.
+	// Files stores and retrieves project media files with FilesOAuth or a project API key.
 	Files *FilesClient
 	// Catalog publishes this integration's own block and endpoint declarations.
 	Catalog *CatalogClient
@@ -164,20 +175,45 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	execHTTP := httpclient.New(transportCfg(cfg.ExecutionURL))
+	execOAuth, err := newExecutionOAuth(cfg.ExecutionURL, cfg.ExecutionOAuth)
+	if err != nil {
+		return nil, err
+	}
 	crmHTTP := httpclient.New(transportCfg(cfg.CRMURL))
+	crmOAuth, err := newCRMOAuth(cfg.CRMURL, cfg.CRMOAuth)
+	if err != nil {
+		return nil, err
+	}
 	mediaHTTP := httpclient.New(transportCfg(cfg.MediaURL))
+	filesOAuth, err := newFilesOAuth(cfg.MediaURL, cfg.FilesOAuth)
+	if err != nil {
+		return nil, err
+	}
+	linksOAuth, err := newLinksOAuth(cfg.LinksURL, cfg.LinksOAuth)
+	if err != nil {
+		return nil, err
+	}
 	catalogHTTP := httpclient.New(transportCfg(cfg.CatalogURL))
+	catalogOAuth, err := newApplicationOAuth(cfg.CatalogURL, "catalog", cfg.ApplicationOAuth)
+	if err != nil {
+		return nil, err
+	}
+	callbacksOAuth, err := newApplicationOAuth(cfg.LinksURL, "links", cfg.ApplicationOAuth)
+	if err != nil {
+		return nil, err
+	}
 
 	c := &Client{
 		integrationID: cfg.IntegrationID,
 		signer:        signer,
 	}
-	c.Steps = &StepsClient{http: execHTTP, id: cfg.IntegrationID, signer: signer}
-	c.Triggers = &TriggersClient{http: execHTTP, id: cfg.IntegrationID, signer: signer}
-	c.CRM = &CRMClient{http: crmHTTP, apiKey: cfg.APIKey}
-	c.Files = &FilesClient{http: mediaHTTP, apiKey: cfg.APIKey}
-	c.Links = &LinksClient{http: httpclient.New(transportCfg(cfg.LinksURL)), baseURL: cfg.LinksURL, id: cfg.IntegrationID, signer: signer, apiKey: cfg.APIKey}
+	c.Steps = &StepsClient{http: execHTTP, id: cfg.IntegrationID, signer: signer, oauth: execOAuth}
+	c.Triggers = &TriggersClient{http: execHTTP, id: cfg.IntegrationID, signer: signer, oauth: execOAuth}
+	c.CRM = &CRMClient{http: crmHTTP, apiKey: cfg.APIKey, oauth: crmOAuth}
+	c.Files = &FilesClient{http: mediaHTTP, apiKey: cfg.APIKey, oauth: filesOAuth}
+	c.Links = &LinksClient{applicationOAuth: callbacksOAuth, oauth: linksOAuth, http: httpclient.New(transportCfg(cfg.LinksURL)), baseURL: cfg.LinksURL, id: cfg.IntegrationID, signer: signer, apiKey: cfg.APIKey}
 	c.Catalog = &CatalogClient{
+		oauth:         catalogOAuth,
 		http:          catalogHTTP,
 		id:            cfg.IntegrationID,
 		signer:        signer,

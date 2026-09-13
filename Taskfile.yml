@@ -70,6 +70,28 @@ tasks:
     cmds:
       - go test ./integration -run '^TestLifecycle' -count=1 {{.CLI_ARGS}}
 
+  test:migration-proof:
+    desc: Verify migration challenge signatures, pinned auth delivery and receiver boundary
+    cmds:
+      - go test ./integrationoauth ./integration -run '^TestMigrationProof' -count=1 -timeout=2m {{.CLI_ARGS}}
+
+  test:migration-settings:
+    desc: Verify durable receiver binding, settings recovery and strict signed commands
+    cmds:
+      - go test ./integrationoauth ./integration -run '^TestMigration' -count=1 -timeout=2m {{.CLI_ARGS}}
+
+  test:oauth:
+    desc: 'Verify OAuth assertions, cache isolation, concurrency and HTTP retry boundaries (optional -- -race)'
+    cmds:
+      - go test ./integrationoauth -count=1 -timeout=2m {{.CLI_ARGS}}
+      - go test ./integration -run '^TestExecutionOAuth|^TestCRMOAuth|^TestFilesOAuth|^TestLinksOAuth|^TestApplicationOAuth' -count=1 -timeout=2m {{.CLI_ARGS}}
+
+  build:
+    desc: Build both SDK modules
+    cmds:
+      - go build ./...
+      - go build ./{{.YDB_DIR}}/...
+
   check:
     desc: Run all local checks (fmt, tidy, vet, test)
     cmds:

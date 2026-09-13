@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Alexey-zaliznuak/aheron-go-sdk/integrationoauth"
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/httpclient"
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
 	"net/http"
@@ -15,11 +16,14 @@ import (
 
 // LinksClient owns link-service URLs, types and authentication. Prefer a stable creation key per outgoing message/action.
 type LinksClient struct {
+	applicationOAuth    *applicationOAuth
+	oauth               *linksOAuth
 	http                *httpclient.Client
 	baseURL, id, apiKey string
 	signer              *sign.Signer
 }
 
+// WithAPIKey preserves an explicit LinksOAuth installation binding.
 func (c *LinksClient) WithAPIKey(key string) *LinksClient { out := *c; out.apiKey = key; return &out }
 
 type LinkCallback struct {
@@ -100,6 +104,9 @@ func (c *LinksClient) call(ctx context.Context, method, path, key string, in, ou
 			return err
 		}
 	}
+	if c.oauth != nil {
+		return c.oauth.call(ctx, method, path, key, body, out)
+	}
 	headers := map[string]string{"Content-Type": "application/json"}
 	if key != "" {
 		headers["Idempotency-Key"] = key
@@ -165,6 +172,26 @@ func (c *LinksClient) Disable(ctx context.Context, project, id string) error {
 	return c.call(ctx, "DELETE", p, "", nil, nil, true)
 }
 func (c *LinksClient) RegisterCallback(ctx context.Context, key string, in LinkEndpointRequest) (LinkEndpoint, error) {
+	if c.applicationOAuth != nil {
+		if !applicationEndpointKey.MatchString(key) {
+			return LinkEndpoint{}, integrationoauth.ErrRequest
+		}
+		body, err := json.Marshal(in)
+		if err != nil {
+			return LinkEndpoint{}, err
+		}
+		var out LinkEndpoint
+		if err := c.applicationOAuth.call(ctx, http.MethodPut, "/integrations/self/link-callbacks/"+key, body, &out); err != nil {
+			return LinkEndpoint{}, err
+		}
+		if out.Key != key || !integrationOAuthUUID(out.IntegrationID) || out.Version < 1 {
+			return LinkEndpoint{}, errApplicationOAuthResponse
+		}
+		return out, nil
+	}
+	if c.oauth != nil {
+		return LinkEndpoint{}, integrationoauth.ErrRequest
+	}
 	var out LinkEndpoint
 	if !regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`).MatchString(key) {
 		return out, fmt.Errorf("links: invalid endpoint key")

@@ -9,7 +9,8 @@ import (
 )
 
 // APIError is returned when the platform responds with a non-2xx status. It
-// carries the HTTP status, the extracted error message and the raw body.
+// carries the HTTP status and error message. OAuth resource calls intentionally
+// omit raw bodies and use a safe message, since an upstream can reflect secrets.
 type APIError = httpclient.APIError
 
 // IsUnauthorized reports whether err is an *APIError carrying a 401 or 403

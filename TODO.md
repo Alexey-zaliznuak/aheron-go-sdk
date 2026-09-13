@@ -1,5 +1,41 @@
 # SDK tasks
 
+## Integration OAuth
+
+- [x] Migration proof client/handler: отдельный signed domain, pinned HTTPS issuer,
+  Ed25519 assertions, строгий receipt, без изменения installation state.
+- [x] Manifest.OAuthMigrationPath → oauthMigrationUrl: отдельный HTTPS receiver;
+  sender принадлежит backend, совместимость проверяется обоими модулями.
+- [x] Receiver proof/settings с обязательным CAS store: локальный pending до auth HTTP,
+  привязка к lifetime/credential, запись identity и точный stored receipt после commit.
+- [x] OAuth-клиенты и постоянный receiver включены в релиз v0.37.0.
+- [ ] Подключить постоянные stores и OAuth-клиенты интеграций к опубликованной версии.
+
+13 сентября 2026: settings/proof SDK-тесты с `-race`, настоящий backend→SDK HTTP
+контракт, `task test`, `task vet` и `task build` обоих модулей прошли.
+
+- [x] Отдельный Provider для clientId/keyId/окружения: Ed25519 private_key_jwt,
+  новые jti, точный form-контракт auth-service и строгая проверка ответа.
+- [x] Ограниченный кеш по project/installation/audience/scopes, lazy refresh с
+  jitter, singleflight, независимая отмена ожидающих и безопасная инвалидация.
+- [x] Ресурсный HTTP-клиент: HTTPS origin/path binding, без redirects/cookies/
+  legacy fallback; максимум один 401 retry для GET/HEAD или явной идемпотентной
+  операции с воспроизводимым телом.
+- [x] Подключить OAuth к typed Steps/Triggers: audience execution, проверка
+  конфигурации проекта, отдельные scopes, безопасные повторы без fallback.
+- [x] CRMOAuth: все существующие typed CRM-методы, project/installation binding,
+  scopes по операциям, upsert с variables.write, безопасные ошибки без fallback;
+  GET может повторить 401 один раз, записи автоматически не повторяются.
+- [x] FilesOAuth: все typed Files-методы, audience media, отдельные files.read/
+  files.write, S3 PUT без OAuth/cookies/redirects, ошибки без секретов.
+- [x] LinksOAuth для шести проектных методов: scopes/project/owner, безопасный
+  Create retry по сохранённому ключу; RegisterCallback не использует grant проекта.
+- [x] Application OAuth для Catalog и Links.RegisterCallback: отдельное право
+  клиента на собственные глобальные настройки, без project installation grant.
+- [ ] Обновить интеграции опубликованной версией v0.37.0.
+
+Контракт и настройки: `docs/integration-oauth.md`. Реальные установки не переключены.
+
 ## Template files
 
 - [x] Platform-only RetireSnapshot: stable DELETE, explicit 204, no redirects or automatic retries.

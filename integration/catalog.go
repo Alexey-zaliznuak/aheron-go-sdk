@@ -22,6 +22,7 @@ const selfSyncPath = "/integrations/self/sync"
 // CatalogClient publishes the integration's own catalog declaration. The call is
 // signed with the integration's private key.
 type CatalogClient struct {
+	oauth         *applicationOAuth
 	http          *httpclient.Client
 	id            string
 	signer        *sign.Signer
@@ -70,6 +71,16 @@ func (c *CatalogClient) Sync(ctx context.Context, m Manifest) (SyncResult, error
 		return SyncResult{}, fmt.Errorf("integration: marshal manifest: %w", err)
 	}
 
+	if c.oauth != nil {
+		var out SyncResult
+		if err := c.oauth.call(ctx, http.MethodPost, selfSyncPath, body, &out); err != nil {
+			return SyncResult{}, err
+		}
+		if out.Version < 1 {
+			return SyncResult{}, errApplicationOAuthResponse
+		}
+		return out, nil
+	}
 	req, err := buildSignedRequest(c.signer, c.id, http.MethodPost, selfSyncPath, nil, body, true)
 	if err != nil {
 		return SyncResult{}, err

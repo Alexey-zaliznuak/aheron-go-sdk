@@ -12,16 +12,18 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Alexey-zaliznuak/aheron-go-sdk/integrationoauth"
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/httpclient"
 )
 
 // FilesClient stores and retrieves a project's media files in the platform
-// media-service, authorized by the project API key granted to the integration
-// at install time. The project is inferred from the key, so no project id is
+// media-service, authorized by FilesOAuth or the legacy project API key.
+// The project is inferred from the credential, so no project id is
 // passed. Metadata paths are relative to the configured MediaURL (which carries
 // the "/api/media" gateway prefix); file bytes are uploaded directly to object
 // storage via a presigned URL and never flow through media-service.
 type FilesClient struct {
+	oauth  *filesOAuth
 	http   *httpclient.Client
 	apiKey string
 	// putClient uploads bytes straight to the presigned object-storage URL. It is
@@ -33,6 +35,7 @@ type FilesClient struct {
 // WithAPIKey returns a copy of the client that authenticates with apiKey instead
 // of the key configured on the parent Client. It shares the underlying HTTP
 // transport, so it is cheap to derive per request or per project.
+// An explicit FilesOAuth binding is retained and takes precedence over apiKey.
 func (c *FilesClient) WithAPIKey(apiKey string) *FilesClient {
 	clone := *c
 	clone.apiKey = apiKey
@@ -121,7 +124,7 @@ func (c *FilesClient) UploadToNamespace(ctx context.Context, namespace, fileName
 	if len(content) == 0 {
 		return File{}, fmt.Errorf("integration: Upload requires content")
 	}
-	if c.apiKey == "" {
+	if c.oauth == nil && c.apiKey == "" {
 		return File{}, errNoAPIKey
 	}
 
@@ -146,20 +149,23 @@ func (c *FilesClient) UploadToNamespace(ctx context.Context, namespace, fileName
 	if err != nil {
 		return File{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return File{}, err
 	}
-	return decodeFile(resp.Body)
+	return c.decodeFile(resp.Body)
 }
 
 // Replace repoints an existing file at new content, keeping its id. Like Upload,
 // the bytes go directly to object storage.
 func (c *FilesClient) Replace(ctx context.Context, fileID, mimeType string, content []byte) (File, error) {
+	if c.oauth != nil && !integrationOAuthUUID(fileID) {
+		return File{}, integrationoauth.ErrRequest
+	}
 	if fileID == "" || len(content) == 0 {
 		return File{}, fmt.Errorf("integration: Replace requires fileID and content")
 	}
-	if c.apiKey == "" {
+	if c.oauth == nil && c.apiKey == "" {
 		return File{}, errNoAPIKey
 	}
 
@@ -182,11 +188,11 @@ func (c *FilesClient) Replace(ctx context.Context, fileID, mimeType string, cont
 	if err != nil {
 		return File{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return File{}, err
 	}
-	return decodeFile(resp.Body)
+	return c.decodeFile(resp.Body)
 }
 
 // ListParams filters and paginates a file listing. Before is a keyset cursor
@@ -214,13 +220,13 @@ func (c *FilesClient) List(ctx context.Context, p ListParams) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	var out filesListResponse
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return nil, fmt.Errorf("integration: decode files list: %w", err)
+		return nil, c.decodeError("files list", err)
 	}
 	return out.Files, nil
 }
@@ -234,11 +240,11 @@ func (c *FilesClient) Get(ctx context.Context, fileID string) (File, error) {
 	if err != nil {
 		return File{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return File{}, err
 	}
-	return decodeFile(resp.Body)
+	return c.decodeFile(resp.Body)
 }
 
 // Rename updates a file's display name.
@@ -254,11 +260,11 @@ func (c *FilesClient) Rename(ctx context.Context, fileID, name string) (File, er
 	if err != nil {
 		return File{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return File{}, err
 	}
-	return decodeFile(resp.Body)
+	return c.decodeFile(resp.Body)
 }
 
 // Delete soft-deletes a file.
@@ -270,7 +276,7 @@ func (c *FilesClient) Delete(ctx context.Context, fileID string) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.http.Do(ctx, req)
+	_, err = c.do(ctx, req)
 	return err
 }
 
@@ -290,13 +296,13 @@ func (c *FilesClient) PurgeNamespace(ctx context.Context, namespace string, last
 	if err != nil {
 		return 0, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return 0, err
 	}
 	var out purgeNamespaceResponse
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return 0, fmt.Errorf("integration: decode purge response: %w", err)
+		return 0, c.decodeError("purge response", err)
 	}
 	return out.Deleted, nil
 }
@@ -307,13 +313,16 @@ func (c *FilesClient) Usage(ctx context.Context) (Usage, error) {
 	if err != nil {
 		return Usage{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return Usage{}, err
 	}
 	var out Usage
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return Usage{}, fmt.Errorf("integration: decode usage: %w", err)
+		return Usage{}, c.decodeError("usage", err)
+	}
+	if c.oauth != nil && out.ProjectID != c.oauth.projectID {
+		return Usage{}, errFilesOAuthResponse
 	}
 	return out, nil
 }
@@ -324,13 +333,18 @@ func (c *FilesClient) createUploadURL(ctx context.Context) (uploadURLResponse, e
 	if err != nil {
 		return uploadURLResponse{}, err
 	}
-	resp, err := c.http.Do(ctx, req)
+	resp, err := c.do(ctx, req)
 	if err != nil {
 		return uploadURLResponse{}, err
 	}
 	var out uploadURLResponse
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return uploadURLResponse{}, fmt.Errorf("integration: decode upload url: %w", err)
+		return uploadURLResponse{}, c.decodeError("upload url", err)
+	}
+	if c.oauth != nil {
+		if err := c.oauth.validateUploadTarget(out); err != nil {
+			return uploadURLResponse{}, err
+		}
 	}
 	if out.URL == "" || out.UploadKey == "" {
 		return uploadURLResponse{}, fmt.Errorf("integration: empty upload target")
@@ -343,6 +357,9 @@ func (c *FilesClient) createUploadURL(ctx context.Context) (uploadURLResponse, e
 // transfer; the same MD5 becomes the object's ETag, which the service later uses
 // as the content hash.
 func (c *FilesClient) putObject(ctx context.Context, target uploadURLResponse, content []byte, contentType string) error {
+	if c.oauth != nil {
+		return c.oauth.putObject(ctx, target, content, contentType)
+	}
 	method := target.Method
 	if method == "" {
 		method = http.MethodPut
@@ -377,14 +394,18 @@ func (c *FilesClient) putHTTP() *http.Client {
 }
 
 func (c *FilesClient) bearerRequest(method, path string, query map[string]string, body []byte, idempotent bool) (httpclient.Request, error) {
-	if c.apiKey == "" {
+	if c.oauth == nil && c.apiKey == "" {
 		return httpclient.Request{}, errNoAPIKey
+	}
+	headers := map[string]string{"Authorization": "Bearer " + c.apiKey}
+	if c.oauth != nil {
+		headers = nil
 	}
 	return httpclient.Request{
 		Method:     method,
 		Path:       path,
 		Query:      query,
-		Headers:    map[string]string{"Authorization": "Bearer " + c.apiKey},
+		Headers:    headers,
 		Body:       body,
 		Idempotent: idempotent,
 	}, nil
@@ -393,12 +414,4 @@ func (c *FilesClient) bearerRequest(method, path string, query map[string]string
 func md5Base64(content []byte) string {
 	sum := md5.Sum(content)
 	return base64.StdEncoding.EncodeToString(sum[:])
-}
-
-func decodeFile(body []byte) (File, error) {
-	var out File
-	if err := json.Unmarshal(body, &out); err != nil {
-		return File{}, fmt.Errorf("integration: decode file: %w", err)
-	}
-	return out, nil
 }

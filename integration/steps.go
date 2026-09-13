@@ -17,9 +17,10 @@ const resolvePath = "/integrations/resolve"
 
 const maxResolveIdempotencyKeyBytes = 256
 
-// StepsClient resolves parked integrationAction steps. All calls are signed with
-// the integration's private key.
+// StepsClient resolves parked integrationAction steps using ExecutionOAuth when
+// configured, or the integration's legacy signature otherwise.
 type StepsClient struct {
+	oauth  *executionOAuth
 	http   *httpclient.Client
 	id     string
 	signer *sign.Signer
@@ -51,10 +52,10 @@ type ResolveOptions struct {
 // persists values (subject variables by bare key, project variables under a
 // "project." prefix) and may be nil.
 //
-// The platform verifies the signature, ownership and version, then returns 202
-// and applies the result asynchronously. Redelivery is safe, so this call is
-// retried on transient failures. The request targets the configured ExecutionURL
-// + the standard resolve path.
+// The platform verifies authorization, ownership and version, then returns 202
+// and applies the result asynchronously. OAuth does not automatically retry this
+// unkeyed write; the legacy transport retains its retry policy. The request
+// targets the configured ExecutionURL + the standard resolve path.
 func (c *StepsClient) Resolve(ctx context.Context, ec ExecutionContext, output string, variables map[string]any) error {
 	return c.ResolveWithOptions(ctx, ec, output, variables, ResolveOptions{})
 }
@@ -86,6 +87,9 @@ func (c *StepsClient) ResolveWithOptions(ctx context.Context, ec ExecutionContex
 		return fmt.Errorf("integration: marshal resolve: %w", err)
 	}
 
+	if c.oauth != nil {
+		return c.oauth.resolveStep(ctx, ec, body, len(variables) != 0, options)
+	}
 	req, err := buildSignedRequest(c.signer, c.id, http.MethodPost, resolvePath, nil, body, true)
 	if err != nil {
 		return err
@@ -138,6 +142,9 @@ func (c *StepsClient) ReactivateWithOptions(ctx context.Context, ec ExecutionCon
 		return fmt.Errorf("integration: marshal reactivate: %w", err)
 	}
 
+	if c.oauth != nil {
+		return c.oauth.resolveStep(ctx, ec, body, len(variables) != 0, options)
+	}
 	req, err := buildSignedRequest(c.signer, c.id, http.MethodPost, resolvePath, nil, body, true)
 	if err != nil {
 		return err

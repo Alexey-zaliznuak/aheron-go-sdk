@@ -19,6 +19,18 @@ SDK для построения бэкендов интеграций Aheron н�
 
 Модуль: `github.com/Alexey-zaliznuak/aheron-go-sdk`. Требует Go 1.25+.
 
+Для перехода интеграций на OAuth добавлен пакет `integrationoauth`: получение
+токенов через private_key_jwt, общий кеш установок и HTTP-клиент с ограниченным
+повтором после 401. [Подключение и границы OAuth](docs/integration-oauth.md).
+FilesOAuth разделяет OAuth-запросы media API и presigned S3 PUT;
+[конфигурация и жизненный цикл загрузки](docs/integration-oauth.md#files-media-api-и-загрузка-байтов).
+`integration.New` поддерживает опциональный `ExecutionOAuth` для Steps/Triggers
+`CRMOAuth` для всех CRM-методов, `FilesOAuth` для Files и `LinksOAuth` для проектных Links-методов. Без соответствующей настройки действует
+прежняя авторизация. ApplicationOAuth подключает Catalog.Sync и общий
+Links.RegisterCallback с отдельными правами приложения, без project/installation.
+OAuth-клиенты и постоянный receiver миграции доступны с v0.37.0.
+Подключение хранилищ и переключение реальных интеграций выполняются отдельно.
+
 ## Установка
 
 ```bash
@@ -825,3 +837,42 @@ manifest wire shape. Deploy the catalog field and receiver migrations before
 advertising this capability. The backend pins the HTTPS destination in the
 accepted permission revision; a declaration does not migrate or authorize any
 existing installation by itself.
+
+
+### Migration possession proof (unreleased)
+
+`integrationoauth.NewMigrationProofClient` and `Verifier.HandleMigrationProof`
+implement a separate signed challenge endpoint for existing installations.
+The client sends Ed25519 private_key_jwt and the current legacy credential to a
+pinned HTTPS auth endpoint, validates the exact claimed receipt, and never
+creates or activates an installation. Endpoint declaration, platform delivery
+and durable OAuth receiver identity still require rollout integration.
+See [the protocol and storage callback contract](docs/integration-oauth.md).
+Run `task test:migration-proof -- -race -v`; `test:oauth`, `vet` and `build`
+also passed locally. Test fixtures contain a public test key and fake credential.
+
+
+Migration receiver объявляется через `Manifest.OAuthMigrationPath` (на платформе
+`oauthMigrationUrl`). Это отдельный HTTPS endpoint без query/fragment, отличный
+от install/uninstall/lifecycle. Обработчик — `Verifier.HandleMigrationProof`,
+проверяющий подписанную команду до чтения текущего credential. Platform sender
+принадлежит backend; контракт проверяется командой `task test:migration-delivery:sdk` из backend
+с локальным SDK, без изменения production dependency. Подробности и ограничения
+storage callback: [Integration OAuth](docs/integration-oauth.md#proof-при-миграции-существующей-установки).
+
+### Durable migration settings (unreleased)
+
+`integrationoauth.NewMigrationReceiver(proofClient, store)` and
+`Verifier.HandleMigration(receiver)` extend the migration endpoint with durable
+proof binding and signed OAuth settings. The mandatory `MigrationReceiverStore`
+compares the complete existing installation snapshot in a transaction, including
+its local generation, active status and credential. The receiver never creates
+or activates an installation. It records pending context before auth HTTP, and
+returns `stored` only after the settings commit. Lost replies can be retried;
+deletion, reinstall and conflicting commands are rejected.
+
+Settings contain identity and access versions; private keys and trusted endpoints
+remain deployment configuration. A stored receipt does not prove OAuth operations
+or authorize cutover. Integration stores, runtime wiring and an SDK release are
+still required. See the [store contract](docs/integration-oauth.md#постоянный-receiver-proofsettings-unreleased).
+Run `task test:migration-settings -- -race -v` and the backend's real SDK contract task.

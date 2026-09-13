@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/Alexey-zaliznuak/aheron-go-sdk/integrationoauth"
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/httpclient"
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
 )
@@ -17,9 +18,10 @@ const (
 	triggersPath = "/integrations/triggers"
 )
 
-// TriggersClient activates integration triggers and lists trigger instances. All
-// calls are signed with the integration's private key.
+// TriggersClient activates and lists integration triggers using ExecutionOAuth
+// when configured, or the integration's legacy signature otherwise.
 type TriggersClient struct {
+	oauth  *executionOAuth
 	http   *httpclient.Client
 	id     string
 	signer *sign.Signer
@@ -56,9 +58,9 @@ type activateResponse struct {
 
 // Activate fires the matching trigger(s) and returns the ids of the trigger
 // contexts that were created or refreshed (one per matching trigger step). The
-// platform verifies the signature and that the integration is installed in the
-// project. Activation is deduplicated server-side, so this call is retried on
-// transient failures.
+// platform verifies authorization and the installation in the project. OAuth
+// additionally checks subject ownership and does not automatically retry this
+// write. The legacy transport retains its existing retry policy.
 func (c *TriggersClient) Activate(ctx context.Context, p ActivateParams) ([]string, error) {
 	if p.ProjectID == "" {
 		return nil, fmt.Errorf("integration: Activate requires ProjectID")
@@ -83,6 +85,17 @@ func (c *TriggersClient) Activate(ctx context.Context, p ActivateParams) ([]stri
 		return nil, fmt.Errorf("integration: marshal activate: %w", err)
 	}
 
+	if c.oauth != nil {
+		if p.ProjectID != c.oauth.projectID {
+			return nil, integrationoauth.ErrRequest
+		}
+		var out activateResponse
+		err := c.oauth.call(ctx, c.oauth.triggers, http.MethodPost, activatePath, nil, body, false, http.StatusAccepted, &out)
+		if err == nil && out.ExecutionContextIDs == nil {
+			return nil, errExecutionOAuthResponse
+		}
+		return out.ExecutionContextIDs, err
+	}
 	req, err := buildSignedRequest(c.signer, c.id, http.MethodPost, activatePath, nil, body, true)
 	if err != nil {
 		return nil, err
@@ -135,7 +148,7 @@ type TriggerListing struct {
 }
 
 // List returns the trigger instances of a block type in a project, scoped to
-// this integration. It is a signed GET (the signature covers an empty body). It
+// this integration. Authentication follows the client configuration. It
 // delegates to ListTriggers and drops the version; use ListTriggers when you
 // need the ConfigVersion to guard a local snapshot.
 func (c *TriggersClient) List(ctx context.Context, projectID, blockKey string) ([]TriggerInstance, error) {
@@ -148,7 +161,7 @@ func (c *TriggersClient) List(ctx context.Context, projectID, blockKey string) (
 
 // ListTriggers returns the trigger instances of a block type in a project,
 // scoped to this integration, together with the ConfigVersion they were listed
-// at. It is a signed GET (the signature covers an empty body) to the same
+// at. It uses OAuth or a signed GET according to configuration, to the same
 // endpoint as List.
 //
 // Pair it with HandleTriggerSync: when a sync ping's ConfigVersion is newer than
@@ -164,6 +177,17 @@ func (c *TriggersClient) ListTriggers(ctx context.Context, projectID, blockKey s
 	}
 
 	query := map[string]string{"projectId": projectID, "blockKey": blockKey}
+	if c.oauth != nil {
+		if projectID != c.oauth.projectID {
+			return TriggerListing{}, integrationoauth.ErrRequest
+		}
+		var out TriggerListing
+		err := c.oauth.call(ctx, c.oauth.triggers, http.MethodGet, triggersPath, query, nil, false, http.StatusOK, &out)
+		if err == nil && (out.Triggers == nil || out.ConfigVersion < 0) {
+			return TriggerListing{}, errExecutionOAuthResponse
+		}
+		return out, err
+	}
 	req, err := buildSignedRequest(c.signer, c.id, http.MethodGet, triggersPath, query, nil, true)
 	if err != nil {
 		return TriggerListing{}, err
