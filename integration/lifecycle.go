@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Alexey-zaliznuak/aheron-go-sdk/integrationoauth"
 )
 
 const (
@@ -32,16 +34,18 @@ var (
 // resets after uninstall/reinstall. Installation accessVersion is not a substitute.
 // EventID and the whole message remain immutable across delivery attempts.
 // ProjectAPIKey may accompany install during the API-key bridge. An install
-// without it must clear any previous key; OAuth credentials stay out of this body.
+// without it must clear any previous key. OAuth carries public installation
+// settings only and is mutually exclusive with ProjectAPIKey.
 type LifecycleRequest struct {
-	Protocol       string `json:"protocol"`
-	EventID        string `json:"eventId"`
-	IntegrationID  string `json:"integrationId"`
-	ProjectID      string `json:"projectId"`
-	InstallationID string `json:"installationId"`
-	Sequence       int64  `json:"sequence"`
-	Action         string `json:"action"`
-	ProjectAPIKey  string `json:"projectApiKey,omitempty"`
+	Protocol       string                                 `json:"protocol"`
+	EventID        string                                 `json:"eventId"`
+	IntegrationID  string                                 `json:"integrationId"`
+	ProjectID      string                                 `json:"projectId"`
+	InstallationID string                                 `json:"installationId"`
+	Sequence       int64                                  `json:"sequence"`
+	Action         string                                 `json:"action"`
+	ProjectAPIKey  string                                 `json:"projectApiKey,omitempty"`
+	OAuth          *integrationoauth.InstallationSettings `json:"oauth,omitempty"`
 }
 
 func lifecycleValidID(id string) bool {
@@ -56,6 +60,9 @@ func (r LifecycleRequest) Validate() error {
 		return ErrLifecycleInvalid
 	}
 	if r.Action == LifecycleUninstall && r.ProjectAPIKey != "" {
+		return ErrLifecycleInvalid
+	}
+	if r.OAuth != nil && (r.Action != LifecycleInstall || r.ProjectAPIKey != "" || !r.OAuth.Valid() || r.OAuth.IntegrationID != r.IntegrationID || r.OAuth.ProjectID != r.ProjectID || r.OAuth.InstallationID != r.InstallationID) {
 		return ErrLifecycleInvalid
 	}
 	if len(r.ProjectAPIKey) > 4096 || !utf8.ValidString(r.ProjectAPIKey) || strings.TrimSpace(r.ProjectAPIKey) != r.ProjectAPIKey || strings.ContainsAny(r.ProjectAPIKey, "\r\n\x00") {
@@ -82,6 +89,20 @@ func (r LifecycleRequest) Digest() (string, error) {
 	}
 	h := sha256.Sum256(raw)
 	return hex.EncodeToString(h[:]), nil
+}
+
+// ValidateLifecycleOAuth verifies that stored OAuth settings belong to the exact
+// applied install event, not merely the same project. Use on every runtime read.
+func ValidateLifecycleOAuth(state LifecycleState, settings integrationoauth.InstallationSettings) error {
+	if validateLifecycleState(state) != nil || state.Sequence == 0 || state.Action != LifecycleInstall {
+		return ErrLifecycleState
+	}
+	r := LifecycleRequest{Protocol: LifecycleProtocol, EventID: state.EventID, IntegrationID: state.IntegrationID, ProjectID: state.ProjectID, InstallationID: state.InstallationID, Sequence: state.Sequence, Action: state.Action, OAuth: &settings}
+	digest, err := r.Digest()
+	if err != nil || digest != state.RequestDigest {
+		return ErrLifecycleState
+	}
+	return nil
 }
 
 // LifecycleState is the receiver's durable watermark, scoped by project and

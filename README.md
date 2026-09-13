@@ -876,3 +876,20 @@ remain deployment configuration. A stored receipt does not prove OAuth operation
 or authorize cutover. Integration stores, runtime wiring and an SDK release are
 still required. See the [store contract](docs/integration-oauth.md#постоянный-receiver-proofsettings-unreleased).
 Run `task test:migration-settings -- -race -v` and the backend's real SDK contract task.
+
+### Новые установки через OAuth
+
+`LifecycleRequest.oauth` содержит `integrationoauth.InstallationSettings`: публичные
+идентификаторы клиента/ключа/установки, поколения доступа и принятую policy.
+API-ключ, client secret, private key и URL в нём отсутствуют. `oauth` допустим
+только для install и несовместим с projectApiKey. Старые сообщения сохраняют digest.
+Получатель явно включает `HandleOAuthLifecycle` после обновления хранилища;
+обычный `HandleLifecycle` отклоняет OAuth даже после обновления SDK.
+
+Получатель сохраняет настройки вместе с lifecycle watermark, очищает прежний
+API-ключ и migration state; uninstall очищает настройки в той же транзакции.
+Повтор не меняет состояние, более старое сообщение возвращает superseded.
+`ValidateLifecycleOAuth` проверяет настройки по digest точного install-события
+при чтении для исходящих запросов. Runtime не должен переключаться на legacy
+при ошибке OAuth. `task test:lifecycle -- -race` проверяет эти границы и строгий
+JSON, включая вложенные duplicate/unknown/null поля.

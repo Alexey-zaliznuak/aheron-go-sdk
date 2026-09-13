@@ -22,13 +22,25 @@ type LifecycleHandler func(context.Context, LifecycleRequest) (LifecycleReceipt,
 // not the intended recipient. Never register this on legacy install/uninstall
 // URLs or advertise it before durable watermark/credential handling is ready.
 func (v *Verifier) HandleLifecycle(integrationID string, fn LifecycleHandler) (http.Handler, error) {
+	return v.handleLifecycle(integrationID, fn, false)
+}
+
+// HandleOAuthLifecycle opts a durable receiver into OAuth installation settings.
+// Use only after its repository atomically stores/clears OAuth and legacy state
+// with the watermark and its runtime reads OAuth without falling back to a key.
+// The original HandleLifecycle deliberately rejects OAuth after an SDK upgrade.
+func (v *Verifier) HandleOAuthLifecycle(integrationID string, fn LifecycleHandler) (http.Handler, error) {
+	return v.handleLifecycle(integrationID, fn, true)
+}
+
+func (v *Verifier) handleLifecycle(integrationID string, fn LifecycleHandler, oauth bool) (http.Handler, error) {
 	if !lifecycleValidID(integrationID) || fn == nil {
 		return nil, ErrLifecycleInvalid
 	}
 	verified := v.verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _, _ := VerifiedBody(r)
 		var req LifecycleRequest
-		if err := decodeLifecycleObject(body, &req, lifecycleRequestFields); err != nil || req.Validate() != nil {
+		if err := decodeLifecycleObject(body, &req, lifecycleRequestFields); err != nil || req.Validate() != nil || req.OAuth != nil && !oauth {
 			writeJSONError(w, http.StatusBadRequest, "invalid lifecycle request")
 			return
 		}
@@ -67,10 +79,11 @@ func (v *Verifier) HandleLifecycle(integrationID string, fn LifecycleHandler) (h
 	}), nil
 }
 
-// These v1 messages are flat objects. Token-by-token parsing rejects duplicate,
+// Token-by-token parsing rejects duplicate,
 // unknown, mis-cased, null and missing fields before struct unmarshalling can
-// silently discard them. The optional credential must be absent when unused.
-var lifecycleRequestFields = map[string]bool{"protocol": true, "eventId": true, "integrationId": true, "projectId": true, "installationId": true, "sequence": true, "action": true, "projectApiKey": false}
+// silently discard them. OAuth settings have their own strict nested decoder.
+// The optional credential must be absent when unused.
+var lifecycleRequestFields = map[string]bool{"protocol": true, "eventId": true, "integrationId": true, "projectId": true, "installationId": true, "sequence": true, "action": true, "projectApiKey": false, "oauth": false}
 var lifecycleReceiptFields = map[string]bool{"protocol": true, "eventId": true, "integrationId": true, "projectId": true, "installationId": true, "sequence": true, "requestDigest": true, "outcome": true, "observedSequence": true}
 
 func decodeLifecycleObject(body []byte, dst any, fields map[string]bool) error {
