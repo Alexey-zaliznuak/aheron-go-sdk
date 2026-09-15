@@ -2,8 +2,8 @@ package integration
 
 // This file defines the catalog manifest: the integration's own declaration of
 // what it offers the platform. It is the counterpart of the catalog rows the
-// platform stores — the version's HTTP contract (install/action/trigger-sync/
-// variable-values endpoints) and the block declarations inside it.
+// platform stores — the version's HTTP contract (OAuth installation lifecycle,
+// action, trigger-sync and variable-values endpoints) and its block declarations.
 //
 // The point of declaring it in code is that there is then one source of truth.
 // Before this existed the block set was typed into the platform UI by hand and
@@ -17,7 +17,6 @@ package integration
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/Alexey-zaliznuak/aheron-go-sdk/integrationoauth"
 	"io/fs"
 	"path"
 	"strings"
@@ -141,18 +140,9 @@ type Manifest struct {
 	// sidebar. Declaring none leaves the integration reachable the long way,
 	// through the integrations list.
 	ConsolePages []ConsolePage
-	// InstallPath receives InstallRequest when the integration is installed
-	// into a project, UninstallPath receives UninstallRequest when it is
-	// removed.
-	InstallPath   string
-	UninstallPath string
 	// InstallationLifecyclePath receives LifecycleRequest using LifecycleProtocol.
-	// Declare only after durable ordering and legacy credential-write guards are
-	// deployed. It must be distinct from both legacy lifecycle endpoints.
+	// Declare only after durable ordering and credential-write guards are deployed.
 	InstallationLifecyclePath string
-	// OAuthMigrationPath is a separate signed proof endpoint. Declare only after
-	// current-credential lookup and tombstone/lifetime checks are deployed.
-	OAuthMigrationPath string
 	// ActionPath is the single endpoint every action block of this version is
 	// called on; ActionRequestTemplate is the body template the platform fills
 	// in (placeholders {{context}}, {{actionKey}}, {{blockSettings}}, {{vars}},
@@ -193,10 +183,7 @@ type manifestBody struct {
 	ResourceSources          map[string]schemetransfer.ResourceSource `json:"resourceSources,omitempty"`
 	ConsoleURL               string                                   `json:"consoleUrl,omitempty"`
 	ConsolePages             []consolePageBody                        `json:"consolePages,omitempty"`
-	InstallURL               string                                   `json:"installUrl,omitempty"`
-	UninstallURL             string                                   `json:"uninstallUrl,omitempty"`
 	InstallationLifecycleURL string                                   `json:"installationLifecycleUrl,omitempty"`
-	OAuthMigrationURL        string                                   `json:"oauthMigrationUrl,omitempty"`
 	ActionURL                string                                   `json:"actionUrl,omitempty"`
 	ActionRequestTemplate    json.RawMessage                          `json:"actionRequestTemplate,omitempty"`
 	TriggerSyncURL           string                                   `json:"triggerSyncUrl,omitempty"`
@@ -250,26 +237,8 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 	if err != nil {
 		return manifestBody{}, err
 	}
-	installURL, err := resolveURL(base, m.InstallPath, "InstallPath")
-	if err != nil {
-		return manifestBody{}, err
-	}
-	uninstallURL, err := resolveURL(base, m.UninstallPath, "UninstallPath")
-	if err != nil {
-		return manifestBody{}, err
-	}
 	lifecycleURL, err := resolveURL(base, m.InstallationLifecyclePath, "InstallationLifecyclePath")
 	if err != nil {
-		return manifestBody{}, err
-	}
-	if lifecycleURL != "" && (lifecycleURL == installURL || lifecycleURL == uninstallURL) {
-		return manifestBody{}, fmt.Errorf("integration: lifecycle endpoint must be distinct from legacy endpoints")
-	}
-	migrationURL, err := resolveURL(base, m.OAuthMigrationPath, "OAuthMigrationPath")
-	if err != nil {
-		return manifestBody{}, err
-	}
-	if err := integrationoauth.ValidateMigrationEndpoint(migrationURL, installURL, uninstallURL, lifecycleURL); err != nil {
 		return manifestBody{}, err
 	}
 	actionURL, err := resolveURL(base, m.ActionPath, "ActionPath")
@@ -398,10 +367,7 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 		ImportCopyFileURL: importFileURL, ResourceValuesURL: resourceURL, PrepareCopyURL: prepareURL, ValidateCopySettingsURL: validateURL, ResourceSources: m.ResourceSources,
 		ConsoleURL:               consoleURL,
 		ConsolePages:             pages,
-		InstallURL:               installURL,
-		UninstallURL:             uninstallURL,
 		InstallationLifecycleURL: lifecycleURL,
-		OAuthMigrationURL:        migrationURL,
 		ActionURL:                actionURL,
 		ActionRequestTemplate:    m.ActionRequestTemplate,
 		TriggerSyncURL:           triggerSyncURL,

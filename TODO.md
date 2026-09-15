@@ -2,17 +2,9 @@
 
 ## Integration OAuth
 
-- [x] Migration proof client/handler: отдельный signed domain, pinned HTTPS issuer,
-  Ed25519 assertions, строгий receipt, без изменения installation state.
-- [x] Manifest.OAuthMigrationPath → oauthMigrationUrl: отдельный HTTPS receiver;
-  sender принадлежит backend, совместимость проверяется обоими модулями.
-- [x] Receiver proof/settings с обязательным CAS store: локальный pending до auth HTTP,
-  привязка к lifetime/credential, запись identity и точный stored receipt после commit.
-- [x] OAuth-клиенты и постоянный receiver включены в релиз v0.37.0.
-- [ ] Подключить постоянные stores и OAuth-клиенты интеграций к опубликованной версии.
-
-13 сентября 2026: settings/proof SDK-тесты с `-race`, настоящий backend→SDK HTTP
-контракт, `task test`, `task vet` и `task build` обоих модулей прошли.
+- [x] OAuth clients and ordered installation lifecycle remain the supported
+  platform integration contract; retired migration receivers and proof helpers
+  were removed after the production cutover.
 
 - [x] Отдельный Provider для clientId/keyId/окружения: Ed25519 private_key_jwt,
   новые jti, точный form-контракт auth-service и строгая проверка ответа.
@@ -32,7 +24,7 @@
   Create retry по сохранённому ключу; RegisterCallback не использует grant проекта.
 - [x] Application OAuth для Catalog и Links.RegisterCallback: отдельное право
   клиента на собственные глобальные настройки, без project installation grant.
-- [ ] Обновить интеграции опубликованной версией v0.37.0.
+- [ ] Обновить интеграции следующей опубликованной minor-версией SDK.
 
 Контракт и настройки: `docs/integration-oauth.md`. Реальные установки не переключены.
 

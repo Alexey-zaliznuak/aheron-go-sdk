@@ -29,7 +29,7 @@ func applicationSDKFixture(t *testing.T, h http.HandlerFunc) *Client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := New(Config{IntegrationID: linksOAuthInstall, PrivateKey: base64.StdEncoding.EncodeToString(key), APIKey: "legacy-secret", CatalogURL: server.URL + "/api", LinksURL: server.URL + "/api",
+	c, err := New(Config{IntegrationID: linksOAuthInstall, APIKey: "legacy-secret", CatalogURL: server.URL + "/api", LinksURL: server.URL + "/api",
 		ApplicationOAuth: &ApplicationOAuthConfig{Provider: provider, HTTPClient: server.Client()},
 		LinksOAuth:       &LinksOAuthConfig{Provider: provider, ProjectID: linksOAuthProject, InstallationID: linksOAuthInstall, HTTPClient: server.Client()}})
 	if err != nil {

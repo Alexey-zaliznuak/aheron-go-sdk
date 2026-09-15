@@ -2,19 +2,17 @@
 // integration backend both halves of the platform trust model:
 //
 //   - Outbound (integration -> platform): a Client that calls the platform's
-//     signed endpoints — resolve a parked integrationAction step, activate a
+//     OAuth endpoints — resolve a parked integrationAction step, activate a
 //     trigger, list trigger instances, publish the integration's own catalog
-//     manifest — plus a CRM client for reading/writing subject data with a
-//     project API key. Every signed call is authenticated with the integration's
-//     own Ed25519 private key.
+//     manifest — plus a CRM client for reading/writing subject data.
 //   - Inbound (platform -> integration): a Verifier that authenticates the
-//     signed requests the platform sends to the integration backend (install and
+//     signed requests the platform sends to the integration backend (lifecycle and
 //     action), so handlers run only on verified bodies they decode themselves.
 //
 // Construct a Client with New and a Config. Sensible defaults are applied for
-// URLs, timeout, retries and logging, so the minimal setup is just the
-// integration id and private key (plus a project API key if you use the CRM
-// client).
+// URLs, timeout, retries and logging. Installation-scoped platform calls need
+// the corresponding OAuth configuration; explicit project API keys are only
+// for user-created credentials.
 package integration
 
 import (
@@ -22,7 +20,6 @@ import (
 	"time"
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/httpclient"
-	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
 )
 
 // Default platform base URLs, used when the corresponding Config field is empty.
@@ -58,11 +55,8 @@ type Config struct {
 	// IntegrationID is this integration's platform id (a uuid). It is sent in the
 	// X-Integration-Id header of signed callbacks.
 	IntegrationID string
-	// PrivateKey is this integration's Ed25519 private key, base64 (std) encoded
-	// — either a 32-byte seed or a full 64-byte key. It signs outbound callbacks.
-	PrivateKey string
-	// APIKey is the project API key (ahr_proj_...) granted to the integration at
-	// install time. It authenticates CRM data calls. Optional.
+	// APIKey is an explicit, user-created project API key. It authenticates CRM,
+	// files, or links calls when no scoped OAuth client is configured.
 	APIKey string
 
 	// ExecutionOAuth authenticates Steps and Triggers with installation-scoped
@@ -114,11 +108,11 @@ type Config struct {
 // Client is the outbound half of the SDK: it groups the platform capabilities an
 // integration uses. It is safe for concurrent use.
 type Client struct {
-	// Steps resolves parked integrationAction steps.
+	// Steps resolves parked integrationAction steps with ExecutionOAuth.
 	Steps *StepsClient
 	// Triggers activates and lists integration triggers.
 	Triggers *TriggersClient
-	// CRM reads and writes data using CRMOAuth or the legacy project API key.
+	// CRM reads and writes data using CRMOAuth or an explicit project API key.
 	CRM *CRMClient
 	// Files stores and retrieves project media files with FilesOAuth or a project API key.
 	Files *FilesClient
@@ -127,13 +121,11 @@ type Client struct {
 	Links   *LinksClient
 
 	integrationID string
-	signer        *sign.Signer
 }
 
-// New builds a Client from cfg. It returns an error when the private key is set
-// but cannot be parsed. A missing private key is allowed (the signed endpoints
-// will then return an error when used), so an integration that only needs the
-// CRM client can still construct a Client.
+// New builds a Client from cfg. Installation-scoped calls require their OAuth
+// configuration; explicit project API keys remain available for user-created
+// credentials.
 func New(cfg Config) (*Client, error) {
 	if cfg.ExecutionURL == "" {
 		cfg.ExecutionURL = DefaultExecutionURL
@@ -154,15 +146,6 @@ func New(cfg Config) (*Client, error) {
 		cfg.Logger = NopLogger()
 	}
 
-	priv, err := sign.ParsePrivateKey(cfg.PrivateKey)
-	if err != nil {
-		return nil, err
-	}
-	var signer *sign.Signer
-	if priv != nil {
-		signer = sign.NewSigner(priv)
-	}
-
 	transportCfg := func(baseURL string) httpclient.Config {
 		return httpclient.Config{
 			BaseURL:      baseURL,
@@ -174,7 +157,6 @@ func New(cfg Config) (*Client, error) {
 		}
 	}
 
-	execHTTP := httpclient.New(transportCfg(cfg.ExecutionURL))
 	execOAuth, err := newExecutionOAuth(cfg.ExecutionURL, cfg.ExecutionOAuth)
 	if err != nil {
 		return nil, err
@@ -193,7 +175,6 @@ func New(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	catalogHTTP := httpclient.New(transportCfg(cfg.CatalogURL))
 	catalogOAuth, err := newApplicationOAuth(cfg.CatalogURL, "catalog", cfg.ApplicationOAuth)
 	if err != nil {
 		return nil, err
@@ -203,28 +184,19 @@ func New(cfg Config) (*Client, error) {
 		return nil, err
 	}
 
-	c := &Client{
-		integrationID: cfg.IntegrationID,
-		signer:        signer,
-	}
-	c.Steps = &StepsClient{http: execHTTP, id: cfg.IntegrationID, signer: signer, oauth: execOAuth}
-	c.Triggers = &TriggersClient{http: execHTTP, id: cfg.IntegrationID, signer: signer, oauth: execOAuth}
+	c := &Client{integrationID: cfg.IntegrationID}
+	c.Steps = &StepsClient{oauth: execOAuth}
+	c.Triggers = &TriggersClient{oauth: execOAuth}
 	c.CRM = &CRMClient{http: crmHTTP, apiKey: cfg.APIKey, oauth: crmOAuth}
 	c.Files = &FilesClient{http: mediaHTTP, apiKey: cfg.APIKey, oauth: filesOAuth}
-	c.Links = &LinksClient{applicationOAuth: callbacksOAuth, oauth: linksOAuth, http: httpclient.New(transportCfg(cfg.LinksURL)), baseURL: cfg.LinksURL, id: cfg.IntegrationID, signer: signer, apiKey: cfg.APIKey}
+	c.Links = &LinksClient{applicationOAuth: callbacksOAuth, oauth: linksOAuth, http: httpclient.New(transportCfg(cfg.LinksURL)), baseURL: cfg.LinksURL, id: cfg.IntegrationID, apiKey: cfg.APIKey}
 	c.Catalog = &CatalogClient{
 		oauth:         catalogOAuth,
-		http:          catalogHTTP,
-		id:            cfg.IntegrationID,
-		signer:        signer,
 		publicBaseURL: cfg.PublicBaseURL,
 		log:           cfg.Logger,
 	}
 	return c, nil
 }
-
-// errNoSigner is returned by signed calls when no private key was configured.
-var errNoSigner = errors.New("integration: no private key configured; set Config.PrivateKey to call signed endpoints")
 
 // errNoAPIKey is returned by CRM calls when no project API key was configured.
 var errNoAPIKey = errors.New("integration: no project API key configured; set Config.APIKey to call the CRM")

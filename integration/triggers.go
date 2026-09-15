@@ -7,8 +7,6 @@ import (
 	"net/http"
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/integrationoauth"
-	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/httpclient"
-	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
 )
 
 // Paths are relative to the configured ExecutionURL, which already carries the
@@ -18,13 +16,9 @@ const (
 	triggersPath = "/integrations/triggers"
 )
 
-// TriggersClient activates and lists integration triggers using ExecutionOAuth
-// when configured, or the integration's legacy signature otherwise.
+// TriggersClient activates and lists integration triggers using ExecutionOAuth.
 type TriggersClient struct {
-	oauth  *executionOAuth
-	http   *httpclient.Client
-	id     string
-	signer *sign.Signer
+	oauth *executionOAuth
 }
 
 // ActivateParams starts a trigger for a subject in a project. The subject is
@@ -60,7 +54,7 @@ type activateResponse struct {
 // contexts that were created or refreshed (one per matching trigger step). The
 // platform verifies authorization and the installation in the project. OAuth
 // additionally checks subject ownership and does not automatically retry this
-// write. The legacy transport retains its existing retry policy.
+// write.
 func (c *TriggersClient) Activate(ctx context.Context, p ActivateParams) ([]string, error) {
 	if p.ProjectID == "" {
 		return nil, fmt.Errorf("integration: Activate requires ProjectID")
@@ -85,32 +79,18 @@ func (c *TriggersClient) Activate(ctx context.Context, p ActivateParams) ([]stri
 		return nil, fmt.Errorf("integration: marshal activate: %w", err)
 	}
 
-	if c.oauth != nil {
-		if p.ProjectID != c.oauth.projectID {
-			return nil, integrationoauth.ErrRequest
-		}
-		var out activateResponse
-		err := c.oauth.call(ctx, c.oauth.triggers, http.MethodPost, activatePath, nil, body, false, http.StatusAccepted, &out)
-		if err == nil && out.ExecutionContextIDs == nil {
-			return nil, errExecutionOAuthResponse
-		}
-		return out.ExecutionContextIDs, err
+	if c.oauth == nil {
+		return nil, fmt.Errorf("integration: execution OAuth is required for Activate")
 	}
-	req, err := buildSignedRequest(c.signer, c.id, http.MethodPost, activatePath, nil, body, true)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.http.Do(ctx, req)
-	if err != nil {
-		return nil, err
+	if p.ProjectID != c.oauth.projectID {
+		return nil, integrationoauth.ErrRequest
 	}
 	var out activateResponse
-	if len(resp.Body) > 0 {
-		if err := json.Unmarshal(resp.Body, &out); err != nil {
-			return nil, fmt.Errorf("integration: decode activate response: %w", err)
-		}
+	err = c.oauth.call(ctx, c.oauth.triggers, http.MethodPost, activatePath, nil, body, false, http.StatusAccepted, &out)
+	if err == nil && out.ExecutionContextIDs == nil {
+		return nil, errExecutionOAuthResponse
 	}
-	return out.ExecutionContextIDs, nil
+	return out.ExecutionContextIDs, err
 }
 
 // TriggerActivation is one declared activationKey -> outputKey mapping of a
@@ -177,30 +157,16 @@ func (c *TriggersClient) ListTriggers(ctx context.Context, projectID, blockKey s
 	}
 
 	query := map[string]string{"projectId": projectID, "blockKey": blockKey}
-	if c.oauth != nil {
-		if projectID != c.oauth.projectID {
-			return TriggerListing{}, integrationoauth.ErrRequest
-		}
-		var out TriggerListing
-		err := c.oauth.call(ctx, c.oauth.triggers, http.MethodGet, triggersPath, query, nil, false, http.StatusOK, &out)
-		if err == nil && (out.Triggers == nil || out.ConfigVersion < 0) {
-			return TriggerListing{}, errExecutionOAuthResponse
-		}
-		return out, err
+	if c.oauth == nil {
+		return TriggerListing{}, fmt.Errorf("integration: execution OAuth is required for ListTriggers")
 	}
-	req, err := buildSignedRequest(c.signer, c.id, http.MethodGet, triggersPath, query, nil, true)
-	if err != nil {
-		return TriggerListing{}, err
-	}
-	resp, err := c.http.Do(ctx, req)
-	if err != nil {
-		return TriggerListing{}, err
+	if projectID != c.oauth.projectID {
+		return TriggerListing{}, integrationoauth.ErrRequest
 	}
 	var out TriggerListing
-	if len(resp.Body) > 0 {
-		if err := json.Unmarshal(resp.Body, &out); err != nil {
-			return TriggerListing{}, fmt.Errorf("integration: decode triggers response: %w", err)
-		}
+	err := c.oauth.call(ctx, c.oauth.triggers, http.MethodGet, triggersPath, query, nil, false, http.StatusOK, &out)
+	if err == nil && (out.Triggers == nil || out.ConfigVersion < 0) {
+		return TriggerListing{}, errExecutionOAuthResponse
 	}
-	return out, nil
+	return out, err
 }

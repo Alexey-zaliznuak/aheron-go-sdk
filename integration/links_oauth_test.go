@@ -33,7 +33,7 @@ func linksOAuthFixture(t *testing.T, handler http.HandlerFunc) *LinksClient {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := New(Config{LinksURL: server.URL + "/api", IntegrationID: linksOAuthInstall, PrivateKey: base64.StdEncoding.EncodeToString(key), APIKey: "ahr_proj_must_not_be_sent", LinksOAuth: &LinksOAuthConfig{Provider: provider, ProjectID: linksOAuthProject, InstallationID: linksOAuthInstall, HTTPClient: server.Client()}})
+	c, err := New(Config{LinksURL: server.URL + "/api", IntegrationID: linksOAuthInstall, APIKey: "ahr_proj_must_not_be_sent", LinksOAuth: &LinksOAuthConfig{Provider: provider, ProjectID: linksOAuthProject, InstallationID: linksOAuthInstall, HTTPClient: server.Client()}})
 	if err != nil {
 		t.Fatal(err)
 	}

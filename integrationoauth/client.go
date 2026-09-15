@@ -48,7 +48,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 
 // Do retries a 401 once for GET/HEAD only, using a fresh token. Other methods
 // return the original 401 after invalidating its token. No retry on 403, 5xx or
-// an ambiguous transport failure; there is never a legacy fallback.
+// an ambiguous transport failure; it never falls back to another credential.
 func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 	retry := req != nil && (req.Method == http.MethodGet || req.Method == http.MethodHead || req.Method == "")
 	return c.do(ctx, req, retry)

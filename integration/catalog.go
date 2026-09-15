@@ -8,24 +8,18 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/httpclient"
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/logx"
-	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
 )
 
 // selfSyncPath is relative to the configured CatalogURL, which already carries
-// the gateway's "/api" prefix. There is no integration id in the path on
-// purpose: the platform takes it from the verified signature, so an integration
-// cannot address anyone's catalog entry but its own.
+// the gateway's "/api" prefix. Application OAuth binds the request to this
+// integration, so there is no integration id in the path.
 const selfSyncPath = "/integrations/self/sync"
 
-// CatalogClient publishes the integration's own catalog declaration. The call is
-// signed with the integration's private key.
+// CatalogClient publishes the integration's own catalog declaration using
+// application OAuth.
 type CatalogClient struct {
 	oauth         *applicationOAuth
-	http          *httpclient.Client
-	id            string
-	signer        *sign.Signer
 	publicBaseURL string
 	log           logx.Logger
 }
@@ -81,22 +75,7 @@ func (c *CatalogClient) Sync(ctx context.Context, m Manifest) (SyncResult, error
 		}
 		return out, nil
 	}
-	req, err := buildSignedRequest(c.signer, c.id, http.MethodPost, selfSyncPath, nil, body, true)
-	if err != nil {
-		return SyncResult{}, err
-	}
-	resp, err := c.http.Do(ctx, req)
-	if err != nil {
-		return SyncResult{}, err
-	}
-
-	var out SyncResult
-	if len(resp.Body) > 0 {
-		if err := json.Unmarshal(resp.Body, &out); err != nil {
-			return SyncResult{}, fmt.Errorf("integration: decode sync response: %w", err)
-		}
-	}
-	return out, nil
+	return SyncResult{}, fmt.Errorf("integration: application OAuth is required for catalog sync")
 }
 
 // Startup sync pacing. The initial jitter spreads the replicas of one

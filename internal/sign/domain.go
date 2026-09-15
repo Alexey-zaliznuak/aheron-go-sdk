@@ -8,7 +8,7 @@ import (
 // SignDomain signs "<domain>.<timestamp>.<body>". Domain is a fixed protocol
 // constant chosen by the caller, never inferred from untrusted message fields.
 // Placing it BEFORE the numeric timestamp distinguishes this signature from
-// every legacy signature, including legacy signatures over arbitrary bodies.
+// every domain-separated signature, including signatures over arbitrary bodies.
 func SignDomain(priv ed25519.PrivateKey, domain, timestamp string, body []byte) string {
 	return base64.StdEncoding.EncodeToString(ed25519.Sign(priv, domainInput(domain, timestamp, body)))
 }

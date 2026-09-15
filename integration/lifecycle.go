@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/integrationoauth"
 )
@@ -33,9 +32,7 @@ var (
 // Sequence is allocated by backend for (projectId, integrationId) and NEVER
 // resets after uninstall/reinstall. Installation accessVersion is not a substitute.
 // EventID and the whole message remain immutable across delivery attempts.
-// ProjectAPIKey may accompany install during the API-key bridge. An install
-// without it must clear any previous key. OAuth carries public installation
-// settings only and is mutually exclusive with ProjectAPIKey.
+// OAuth carries public installation settings for the active installation.
 type LifecycleRequest struct {
 	Protocol       string                                 `json:"protocol"`
 	EventID        string                                 `json:"eventId"`
@@ -44,7 +41,6 @@ type LifecycleRequest struct {
 	InstallationID string                                 `json:"installationId"`
 	Sequence       int64                                  `json:"sequence"`
 	Action         string                                 `json:"action"`
-	ProjectAPIKey  string                                 `json:"projectApiKey,omitempty"`
 	OAuth          *integrationoauth.InstallationSettings `json:"oauth,omitempty"`
 }
 
@@ -59,26 +55,16 @@ func (r LifecycleRequest) Validate() error {
 	if r.Action != LifecycleInstall && r.Action != LifecycleUninstall {
 		return ErrLifecycleInvalid
 	}
-	if r.Action == LifecycleUninstall && r.ProjectAPIKey != "" {
+	if r.OAuth != nil && (r.Action != LifecycleInstall || !r.OAuth.Valid() || r.OAuth.IntegrationID != r.IntegrationID || r.OAuth.ProjectID != r.ProjectID || r.OAuth.InstallationID != r.InstallationID) {
 		return ErrLifecycleInvalid
-	}
-	if r.OAuth != nil && (r.Action != LifecycleInstall || r.ProjectAPIKey != "" || !r.OAuth.Valid() || r.OAuth.IntegrationID != r.IntegrationID || r.OAuth.ProjectID != r.ProjectID || r.OAuth.InstallationID != r.InstallationID) {
-		return ErrLifecycleInvalid
-	}
-	if len(r.ProjectAPIKey) > 4096 || !utf8.ValidString(r.ProjectAPIKey) || strings.TrimSpace(r.ProjectAPIKey) != r.ProjectAPIKey || strings.ContainsAny(r.ProjectAPIKey, "\r\n\x00") {
-		return ErrLifecycleInvalid
-	}
-	for _, c := range r.ProjectAPIKey {
-		if c < 33 || c > 126 {
-			return ErrLifecycleInvalid
-		}
 	}
 	return nil
 }
 
 // Digest returns SHA-256 of the validated, canonical typed message, including
-// the credential when supplied. Persist this digest, never a plaintext body in
-// receipts/logs. All v1 identifiers are canonical lowercase UUID strings.
+// its public OAuth settings when supplied. Persist this digest, never a
+// plaintext body in receipts/logs. All v1 identifiers are canonical lowercase
+// UUID strings.
 func (r LifecycleRequest) Digest() (string, error) {
 	if err := r.Validate(); err != nil {
 		return "", err

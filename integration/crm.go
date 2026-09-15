@@ -12,7 +12,7 @@ import (
 )
 
 // CRMClient reads and writes subject (lead) data in the platform CRM, authorized
-// by CRMOAuth when configured, or the legacy project API key otherwise. Paths are
+// by CRMOAuth when configured, or an explicit user-created project API key. Paths are
 // relative to the configured CRMURL, which already carries the "/api/crm" gateway
 // prefix.
 type CRMClient struct {
@@ -25,7 +25,7 @@ type CRMClient struct {
 // of the key configured on the parent Client. It shares the underlying HTTP
 // transport, so it is cheap to derive per request or per project.
 // If CRMOAuth is configured, its installation binding takes precedence and this
-// method does not disable it. Construct a separate client for a legacy key.
+// method does not disable it. Construct a separate client for another project.
 //
 // Use it when a single integration process acts on behalf of many projects, each
 // with its own project API key (for example one delivered per project on

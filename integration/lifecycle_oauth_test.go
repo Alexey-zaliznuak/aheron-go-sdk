@@ -42,7 +42,6 @@ func TestLifecycleOAuthBindingAndOrdering(t *testing.T) {
 		t.Fatal("late delivery reopened installation", err)
 	}
 	for _, change := range []func(*LifecycleRequest){
-		func(r *LifecycleRequest) { r.ProjectAPIKey = "legacy" },
 		func(r *LifecycleRequest) { r.Action = LifecycleUninstall },
 		func(r *LifecycleRequest) { r.OAuth.ProjectID = lifecycleTestNext },
 		func(r *LifecycleRequest) { r.OAuth.GrantVersion = 0 },
@@ -66,7 +65,6 @@ func TestLifecycleOAuthSignedReceiverOptInAndStrictJSON(t *testing.T) {
 		d, err := DecideLifecycle(LifecycleState{}, r)
 		return d.Receipt, err
 	}
-	legacy, _ := v.HandleLifecycle(lifecycleTestIntegration, fn)
 	h, _ := v.HandleOAuthLifecycle(lifecycleTestIntegration, fn)
 	raw, _ := json.Marshal(lifecycleOAuthRequest())
 	call := func(h http.Handler, raw []byte, want int) {
@@ -79,11 +77,11 @@ func TestLifecycleOAuthSignedReceiverOptInAndStrictJSON(t *testing.T) {
 			t.Fatalf("status %d, want %d", w.Code, want)
 		}
 	}
-	call(legacy, raw, 400)
-	if calls != 0 {
-		t.Fatal("legacy handler silently discarded OAuth")
-	}
 	call(h, raw, 200)
+	withoutOAuth := lifecycleOAuthRequest()
+	withoutOAuth.OAuth = nil
+	withoutOAuthRaw, _ := json.Marshal(withoutOAuth)
+	call(h, withoutOAuthRaw, 400)
 	for _, invalid := range []string{
 		strings.Replace(string(raw), `"oauth":{`, `"oauth":{"unknown":1,`, 1),
 		strings.Replace(string(raw), `"keyId":"key-1"`, `"keyId":"key-1","keyId":"key-2"`, 1),

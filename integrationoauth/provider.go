@@ -1,6 +1,6 @@
 // Package integrationoauth implements Aheron's installation and application OAuth profiles.
 // A Provider owns one registered client/key in one environment; it does not
-// register clients, grant permissions, or fall back to legacy credentials.
+// register clients or grant permissions.
 package integrationoauth
 
 import (
@@ -82,7 +82,7 @@ type flight struct {
 
 // Provider is safe for concurrent use. Share it across installation clients.
 // Refresh is lazy, with early expiry and jitter, not a background renewal loop.
-// Failed refreshes never return a cached token or a legacy credential.
+// Failed refreshes never return a cached token or an unrelated credential.
 type Provider struct {
 	clientID, keyID, endpoint string
 	privateKey                ed25519.PrivateKey

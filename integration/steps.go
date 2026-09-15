@@ -4,11 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
-
-	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/httpclient"
-	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
 )
 
 // resolvePath is relative to the configured ExecutionURL, which already carries
@@ -17,13 +13,9 @@ const resolvePath = "/integrations/resolve"
 
 const maxResolveIdempotencyKeyBytes = 256
 
-// StepsClient resolves parked integrationAction steps using ExecutionOAuth when
-// configured, or the integration's legacy signature otherwise.
+// StepsClient resolves parked integrationAction steps using ExecutionOAuth.
 type StepsClient struct {
-	oauth  *executionOAuth
-	http   *httpclient.Client
-	id     string
-	signer *sign.Signer
+	oauth *executionOAuth
 }
 
 type resolveBody struct {
@@ -54,7 +46,7 @@ type ResolveOptions struct {
 //
 // The platform verifies authorization, ownership and version, then returns 202
 // and applies the result asynchronously. OAuth does not automatically retry this
-// unkeyed write; the legacy transport retains its retry policy. The request
+// unkeyed write. The request
 // targets the configured ExecutionURL + the standard resolve path.
 func (c *StepsClient) Resolve(ctx context.Context, ec ExecutionContext, output string, variables map[string]any) error {
 	return c.ResolveWithOptions(ctx, ec, output, variables, ResolveOptions{})
@@ -87,15 +79,10 @@ func (c *StepsClient) ResolveWithOptions(ctx context.Context, ec ExecutionContex
 		return fmt.Errorf("integration: marshal resolve: %w", err)
 	}
 
-	if c.oauth != nil {
-		return c.oauth.resolveStep(ctx, ec, body, len(variables) != 0, options)
+	if c.oauth == nil {
+		return fmt.Errorf("integration: execution OAuth is required for Resolve")
 	}
-	req, err := buildSignedRequest(c.signer, c.id, http.MethodPost, resolvePath, nil, body, true)
-	if err != nil {
-		return err
-	}
-	_, err = c.http.Do(ctx, req)
-	return err
+	return c.oauth.resolveStep(ctx, ec, body, len(variables) != 0, options)
 }
 
 // Reactivate re-routes the subject through the step's chosen output even after
@@ -142,15 +129,10 @@ func (c *StepsClient) ReactivateWithOptions(ctx context.Context, ec ExecutionCon
 		return fmt.Errorf("integration: marshal reactivate: %w", err)
 	}
 
-	if c.oauth != nil {
-		return c.oauth.resolveStep(ctx, ec, body, len(variables) != 0, options)
+	if c.oauth == nil {
+		return fmt.Errorf("integration: execution OAuth is required for Reactivate")
 	}
-	req, err := buildSignedRequest(c.signer, c.id, http.MethodPost, resolvePath, nil, body, true)
-	if err != nil {
-		return err
-	}
-	_, err = c.http.Do(ctx, req)
-	return err
+	return c.oauth.resolveStep(ctx, ec, body, len(variables) != 0, options)
 }
 
 func validateResolveOptions(operation string, variables map[string]any, options ResolveOptions) error {

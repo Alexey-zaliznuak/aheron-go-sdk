@@ -5,7 +5,6 @@
 //	logger, _ := zap.NewProduction()
 //	c, _ := integration.New(integration.Config{
 //	    IntegrationID: id,
-//	    PrivateKey:    key,
 //	    Logger:        zaplog.New(logger),
 //	})
 package zaplog

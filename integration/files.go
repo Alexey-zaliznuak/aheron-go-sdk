@@ -17,7 +17,7 @@ import (
 )
 
 // FilesClient stores and retrieves a project's media files in the platform
-// media-service, authorized by FilesOAuth or the legacy project API key.
+// media-service, authorized by FilesOAuth or an explicit user-created project API key.
 // The project is inferred from the credential, so no project id is
 // passed. Metadata paths are relative to the configured MediaURL (which carries
 // the "/api/media" gateway prefix); file bytes are uploaded directly to object

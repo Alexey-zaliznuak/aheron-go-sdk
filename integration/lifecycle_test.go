@@ -3,7 +3,6 @@ package integration
 import (
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -25,9 +24,6 @@ func TestLifecycleReorderAndTombstone(t *testing.T) {
 		lifecycleTestRequest(3, LifecycleInstall, lifecycleTestNext),
 		lifecycleTestRequest(4, LifecycleUninstall, lifecycleTestNext),
 	}
-	events[0].ProjectAPIKey, events[2].ProjectAPIKey = "old-secret", "new-secret"
-	// Every ordering converges to the last authoritative event, including
-	// uninstall-before-install. Repeat each message after processing it.
 	var permutations func([]int, []int)
 	permutations = func(order, remaining []int) {
 		if len(remaining) != 0 {
@@ -37,7 +33,6 @@ func TestLifecycleReorderAndTombstone(t *testing.T) {
 			return
 		}
 		var state LifecycleState
-		key := ""
 		for _, index := range order {
 			request := events[index]
 			decision, err := DecideLifecycle(state, request)
@@ -48,19 +43,18 @@ func TestLifecycleReorderAndTombstone(t *testing.T) {
 				t.Fatal("invalid generated receipt")
 			}
 			if decision.Receipt.Outcome == LifecycleApplied {
-				state, key = decision.State, request.ProjectAPIKey
+				state = decision.State
 			}
 			replay, err := DecideLifecycle(state, request)
 			if err != nil || replay.Receipt.Outcome == LifecycleApplied || replay.State != state {
 				t.Fatalf("replay mutated %v: %+v %v", order, replay, err)
 			}
 		}
-		if state.Sequence != 4 || state.InstallationID != lifecycleTestNext || state.Action != LifecycleUninstall || key != "" {
+		if state.Sequence != 4 || state.InstallationID != lifecycleTestNext || state.Action != LifecycleUninstall {
 			t.Fatalf("order %v did not converge: %+v", order, state)
 		}
 	}
 	permutations(nil, []int{0, 1, 2, 3})
-	// An old uninstall cannot clear a newly installed credential.
 	newInstall, _ := DecideLifecycle(LifecycleState{}, events[2])
 	late, err := DecideLifecycle(newInstall.State, events[1])
 	if err != nil || late.Receipt.Outcome != LifecycleSuperseded || late.State != newInstall.State {
@@ -75,17 +69,11 @@ func TestLifecycleReorderAndTombstone(t *testing.T) {
 
 func TestLifecycleConflictsAndBoundaries(t *testing.T) {
 	req := lifecycleTestRequest(1, LifecycleInstall, lifecycleTestFirst)
-	req.ProjectAPIKey = "secret-one"
 	first, err := DecideLifecycle(LifecycleState{}, req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Independent SHA-256 fixture of the v1 ordered JSON representation.
-	if first.State.RequestDigest != "3578650648a612e75dc4d7aa5fe293f3b846610ecce5717e16fe2e1f21154ce3" {
-		t.Fatal("v1 canonical digest changed")
-	}
 	for _, mutate := range []func(*LifecycleRequest){
-		func(r *LifecycleRequest) { r.ProjectAPIKey = "secret-two" },
 		func(r *LifecycleRequest) { r.InstallationID = lifecycleTestNext },
 		func(r *LifecycleRequest) { r.ProjectID = lifecycleTestIntegration },
 		func(r *LifecycleRequest) { r.IntegrationID = lifecycleTestProject },
@@ -106,11 +94,8 @@ func TestLifecycleConflictsAndBoundaries(t *testing.T) {
 		func(r *LifecycleRequest) { r.Protocol = "other" },
 		func(r *LifecycleRequest) { r.Sequence = 0 },
 		func(r *LifecycleRequest) { r.Action = "pause" },
-		func(r *LifecycleRequest) { r.Action = LifecycleUninstall }, // Contains key.
 		func(r *LifecycleRequest) { r.EventID = "00000000-0000-0000-0000-000000000000" },
 		func(r *LifecycleRequest) { r.ProjectID = "invalid" },
-		func(r *LifecycleRequest) { r.ProjectAPIKey = "a\tb" },
-		func(r *LifecycleRequest) { r.ProjectAPIKey = strings.Repeat("a", 4097) },
 	} {
 		changed := req
 		mutate(&changed)
@@ -118,12 +103,11 @@ func TestLifecycleConflictsAndBoundaries(t *testing.T) {
 			t.Fatalf("accepted invalid message: %v", err)
 		}
 	}
-	if strings.Contains(first.State.RequestDigest, req.ProjectAPIKey) || strings.Contains(first.Receipt.RequestDigest, req.ProjectAPIKey) {
-		t.Fatal("plaintext credential in digest")
-	}
 	for _, mutate := range []func(*LifecycleReceipt){
 		func(r *LifecycleReceipt) { r.EventID = lifecycleTestNext },
-		func(r *LifecycleReceipt) { r.RequestDigest = strings.Repeat("0", 64) },
+		func(r *LifecycleReceipt) {
+			r.RequestDigest = "0000000000000000000000000000000000000000000000000000000000000000"
+		},
 		func(r *LifecycleReceipt) { r.Outcome = LifecycleSuperseded },
 		func(r *LifecycleReceipt) { r.ObservedSequence++ },
 	} {

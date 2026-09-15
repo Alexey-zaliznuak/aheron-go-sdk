@@ -13,34 +13,24 @@ import (
 const maxLifecycleBody = 16 << 10
 
 // LifecycleHandler must atomically persist the decision from DecideLifecycle
-// with the credential effect and finish required cleanup before returning its
-// receipt. Do not call legacy project-wide install/uninstall handlers here.
+// with the OAuth credential effect and finish required cleanup before returning
+// its receipt.
 type LifecycleHandler func(context.Context, LifecycleRequest) (LifecycleReceipt, error)
 
-// HandleLifecycle serves a NEW dedicated POST endpoint. Binding the expected
-// integration ID is mandatory: platform signatures alone identify the sender,
-// not the intended recipient. Never register this on legacy install/uninstall
-// URLs or advertise it before durable watermark/credential handling is ready.
-func (v *Verifier) HandleLifecycle(integrationID string, fn LifecycleHandler) (http.Handler, error) {
-	return v.handleLifecycle(integrationID, fn, false)
-}
-
 // HandleOAuthLifecycle opts a durable receiver into OAuth installation settings.
-// Use only after its repository atomically stores/clears OAuth and legacy state
-// with the watermark and its runtime reads OAuth without falling back to a key.
-// The original HandleLifecycle deliberately rejects OAuth after an SDK upgrade.
+// The repository must atomically store/clear OAuth with the lifecycle watermark.
 func (v *Verifier) HandleOAuthLifecycle(integrationID string, fn LifecycleHandler) (http.Handler, error) {
-	return v.handleLifecycle(integrationID, fn, true)
+	return v.handleLifecycle(integrationID, fn)
 }
 
-func (v *Verifier) handleLifecycle(integrationID string, fn LifecycleHandler, oauth bool) (http.Handler, error) {
+func (v *Verifier) handleLifecycle(integrationID string, fn LifecycleHandler) (http.Handler, error) {
 	if !lifecycleValidID(integrationID) || fn == nil {
 		return nil, ErrLifecycleInvalid
 	}
 	verified := v.verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _, _ := VerifiedBody(r)
 		var req LifecycleRequest
-		if err := decodeLifecycleObject(body, &req, lifecycleRequestFields); err != nil || req.Validate() != nil || req.OAuth != nil && !oauth {
+		if err := decodeLifecycleObject(body, &req, lifecycleRequestFields); err != nil || req.Validate() != nil || req.Action == LifecycleInstall && req.OAuth == nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid lifecycle request")
 			return
 		}
@@ -82,8 +72,8 @@ func (v *Verifier) handleLifecycle(integrationID string, fn LifecycleHandler, oa
 // Token-by-token parsing rejects duplicate,
 // unknown, mis-cased, null and missing fields before struct unmarshalling can
 // silently discard them. OAuth settings have their own strict nested decoder.
-// The optional credential must be absent when unused.
-var lifecycleRequestFields = map[string]bool{"protocol": true, "eventId": true, "integrationId": true, "projectId": true, "installationId": true, "sequence": true, "action": true, "projectApiKey": false, "oauth": false}
+// OAuth is optional for uninstall messages and required for installation.
+var lifecycleRequestFields = map[string]bool{"protocol": true, "eventId": true, "integrationId": true, "projectId": true, "installationId": true, "sequence": true, "action": true, "oauth": false}
 var lifecycleReceiptFields = map[string]bool{"protocol": true, "eventId": true, "integrationId": true, "projectId": true, "installationId": true, "sequence": true, "requestDigest": true, "outcome": true, "observedSequence": true}
 
 func decodeLifecycleObject(body []byte, dst any, fields map[string]bool) error {
@@ -111,9 +101,6 @@ func decodeLifecycleObject(body []byte, dst any, fields map[string]bool) error {
 		seen[key] = true
 		var raw json.RawMessage
 		if d.Decode(&raw) != nil || string(raw) == "null" {
-			return ErrLifecycleInvalid
-		}
-		if key == "projectApiKey" && string(raw) == `""` {
 			return ErrLifecycleInvalid
 		}
 	}

@@ -147,12 +147,6 @@ func (v *Verifier) verify(next http.Handler, domain string) http.Handler {
 // the failure).
 type Handler func(ctx context.Context, r *http.Request) error
 
-// InstallHandler handles a verified, decoded install request.
-type InstallHandler func(ctx context.Context, req InstallRequest) error
-
-// UninstallHandler handles a verified, decoded uninstall request.
-type UninstallHandler func(ctx context.Context, req UninstallRequest) error
-
 // TriggerSyncHandler handles a verified, decoded trigger-sync request.
 type TriggerSyncHandler func(ctx context.Context, req TriggerSyncRequest) error
 
@@ -167,44 +161,6 @@ func (v *Verifier) Handle(fn Handler) http.Handler {
 	return v.Verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := fn(r.Context(), r); err != nil {
 			v.log.Error("integration handler failed", LogF("error", err.Error()))
-			writeJSONError(w, http.StatusInternalServerError, "handler failed")
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-}
-
-// HandleInstall verifies the request, decodes the fixed install body and calls
-// fn. Use it for the version's install_url endpoint. A nil error yields 200; a
-// non-nil error yields 500.
-func (v *Verifier) HandleInstall(fn InstallHandler) http.Handler {
-	return v.Verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req InstallRequest
-		if err := DecodeBody(r, &req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := fn(r.Context(), req); err != nil {
-			v.log.Error("integration install handler failed", LogF("error", err.Error()))
-			writeJSONError(w, http.StatusInternalServerError, "handler failed")
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-}
-
-// HandleUninstall verifies the request, decodes the fixed uninstall body and
-// calls fn. Use it for the integration's uninstall_url endpoint. A nil error
-// yields 200; a non-nil error yields 500 so the platform redelivers.
-func (v *Verifier) HandleUninstall(fn UninstallHandler) http.Handler {
-	return v.Verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req UninstallRequest
-		if err := DecodeBody(r, &req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := fn(r.Context(), req); err != nil {
-			v.log.Error("integration uninstall handler failed", LogF("error", err.Error()))
 			writeJSONError(w, http.StatusInternalServerError, "handler failed")
 			return
 		}

@@ -7,12 +7,11 @@ Ed25519 `private_key_jwt`, opaque access token на срок до 5 минут. 
 
 `integration.New` принимает опциональный `ExecutionOAuth` для Steps/Triggers
 `CRMOAuth` для CRM, `FilesOAuth` для Files и `LinksOAuth` для проектных Links-методов.
-Catalog и глобальный RegisterCallback используют отдельный ApplicationOAuth. Сам импорт пакета
-ничего не переключает; перед включением нужен соответствующий resource runtime.
+Catalog и глобальный RegisterCallback используют отдельный ApplicationOAuth. Steps, Triggers, Catalog и RegisterCallback требуют OAuth; альтернативный вход через подпись удалён.
 
 ## Steps и Triggers
 
-После подготовки auth-service и execution-service можно создать клиент для
+Создайте клиент для
 конкретной установки (Provider переиспользуется между клиентами):
 
 ```go
@@ -37,13 +36,13 @@ Resolve/Reactivate проверяется, если присутствует; н
 проект реально сохранённого execution context. Нельзя брать installationId из
 недоверенного запроса. SDK не регистрирует установку и не выдаёт ей права.
 
-В режиме ExecutionOAuth методы не подписывают запросы и не отправляют API key;
+Методы Steps и Triggers используют ExecutionOAuth;
 ошибка токена/HTTP не переключает их обратно. GET может повториться один раз
 после 401. POST повторяется после 401 только для ResolveWithOptions /
 ReactivateWithOptions с непустым устойчивым IdempotencyKey; variables вместе с
 ключом по контракту запрещены. Activate и обычный Resolve/Reactivate не
 повторяются автоматически. 403/5xx/неопределённый сетевой сбой возвращаются
-вызывающему. Настройки legacy RetryCount не влияют на OAuth.
+вызывающему. Настройки RetryCount транспорта не влияют на OAuth.
 
 Ошибка ресурсного HTTP сохраняет APIError/StatusCode/IsUnauthorized, но не тело
 ответа; upstream может отразить секрет. Ответы списка/активации ограничены 1 MiB.
@@ -75,12 +74,12 @@ displayName/description этого дополнительного scope не т�
 ProjectID каждого вызова должен точно совпадать с конфигурацией; object IDs в
 путях — канонические UUID. Изменять project/installation через WithAPIKey нельзя:
 копия сохраняет OAuth. Для другого проекта создаётся клиент с его CRMOAuth
-(Provider общий); для legacy нужен отдельный клиент без CRMOAuth.
+(Provider общий); для project API key нужен отдельный клиент без CRMOAuth.
 
 GET повторяется после 401 не более одного раза. Все CRM-записи, включая PUT,
 PATCH, DELETE и Ensure, автоматически не повторяются: у сервера нет durable
 idempotency receipts. Ensure по-прежнему трактует 409 как уже существующее
-определение. Ошибка выдачи токена, 403/5xx/сбой транспорта не включает legacy.
+определение. Ошибка выдачи токена, 403/5xx/сбой транспорта не включает API-key fallback.
 
 Ответы ограничены 1 MiB и ожидаемыми HTTP-статусами. APIError сохраняет статус,
 но OAuth не возвращает body/сырые ошибки декодирования из upstream. Сервер CRM
@@ -173,7 +172,7 @@ Config или slice приватного ключа не меняет уже с�
 - `MaxEntries` ограничивает размер кеша и количество одновременных различных
   выдач: default 1024, максимум 10000. Кеш вытесняет давно не использованные записи;
   при заполнении всех мест активных выдач возвращается `ErrCapacity`.
-- Ошибка обновления возвращается вызывающему, без старого токена и без legacy
+- Ошибка обновления возвращается вызывающему, без старого токена и без другого credential
   fallback. Ошибки выдачи не кешируются. `Invalidate(request, token)` удаляет
   только указанный токен: запоздалый 401 не вытесняет более новый.
 
@@ -194,7 +193,7 @@ Token POST не повторяется этим пакетом автомати�
 
 `Client` принимает абсолютные URL только внутри настроенных HTTPS origin и
 префикса пути. Иные получатели, Host override, неоднозначные dot/escaped пути
-и смешивание OAuth с Authorization/cookie/legacy signature/API-key headers
+и смешивание OAuth с Authorization/cookie/signature/API-key headers
 отклоняются до получения токена. Redirects не выполняются ни на выдаче токена,
 ни при ресурсном запросе. Переданный HTTPClient копируется; его cookie jar
 не используется, настройки самого вызывающего не меняются. Пользовательский
@@ -224,7 +223,7 @@ scope и владельца объекта. Кеш SDK — только кеш c
 
 `integration.Config.FilesOAuth` включает OAuth для всех существующих методов Files.
 Один client привязан к projectId/installationId. `WithAPIKey` сохраняет эту привязку;
-для legacy-проекта создайте отдельный client. Общий Provider можно использовать
+для project API key создайте отдельный client. Общий Provider можно использовать
 для разных установок — его кеш разделён по installation/project/audience/scopes.
 
 ```go
@@ -266,7 +265,7 @@ GET допускает один повтор после 401 с новым ток
 Provider, ProjectID, InstallationID и опциональный HTTPClient. Audience `links`;
 Get/List/Deliveries используют `links.read`, Create/Disable/Replay — `links.write`.
 Каждый project аргумент должен совпадать с конфигурацией до HTTP-запросов.
-WithAPIKey сохраняет OAuth-привязку; configured signer/API key не служит fallback.
+WithAPIKey сохраняет OAuth-привязку; API key не служит fallback.
 LinksURL должен быть доверенным HTTPS URL (по умолчанию https://link.aheron.pro/api).
 
 Create передаёт стабильный Idempotency-Key и может один раз повторить 401 с тем же
@@ -296,7 +295,7 @@ client, err := integration.New(integration.Config{
 Provider может быть общим с установочными клиентами. Для Catalog.Sync запрашивается
 audience catalog / catalog.write; для Links.RegisterCallback — links /
 links.callbacks.write. Эти права платформа выдаёт клиенту отдельно от согласий
-проектов. IntegrationID и legacy PrivateKey в этой конфигурации не нужны:
+проектов. IntegrationID в этой конфигурации не нужен:
 владельца каталога/endpoint определяет сервер по проверенному токену.
 
 Низкоуровневый API: Provider.ApplicationToken(ctx, ApplicationRequest{Audience,
@@ -326,99 +325,10 @@ INTEGRATION_APPLICATION_OAUTH_ENABLED=true в backend/link-service. Их рес�
 `task test`, `task vet`, `task build` проверяют оба SDK-модуля; существующие
 YDB-тесты второго модуля используют только локальную базу.
 
+## Сохранённые OAuth identities
 
-## Proof при миграции существующей установки
-
-`integrationoauth.NewMigrationProofClient` принимает IntegrationID, существующий
-Ed25519 PrivateKey, доверенный HTTPS ProofEndpoint и HTTPClient. Endpoint берётся
-из конфигурации развёртывания и не принимается от отправителя команды. Credential
-keyId вычисляется как `migration-` + SHA-256 публичного ключа, как в backend.
-
-`Verifier.HandleMigrationProof(client, readCurrentCredential)` создаёт обработчик
-отдельного POST endpoint. Подпись платформы использует самостоятельный домен
-`aheron.oauth-migration-challenge.v1`; lifecycle/block signatures здесь не подходят.
-Проверяются integrationId, kid, сроки, точный digest всех параметров, JSON-поля и
-отсутствие query. До этих проверок storage callback не вызывается.
-
-`ReadMigrationCredential` должен прочитать текущий старый ключ существующей
-установки. При отсутствии строки, tombstone или несовпадении уже известного
-installationId вернуть `integrationoauth.ErrRequest`. Callback ничего не создаёт,
-не привязывает identity и не активирует. Если legacy-строка ещё не знает identity,
-auth независимо сверяет сырой ключ с точным legacyKeyId и текущей lifetime backend.
-HTTP Submit не должен выполняться внутри SQL-транзакции получателя.
-
-SDK формирует private_key_jwt с proof/job/project/installation/key IDs, nonce,
-digest и версиями. JWT действует не более 60 секунд и срока proof; каждая попытка
-получает новый jti. Сырой legacy-токен отправляется только указанному auth endpoint.
-Redirects, cookie jar, автоматический retry и fallback отсутствуют. Положительным
-считается только claimed receipt, точно совпадающий с challenge; произвольный 200,
-pending/consumed или несовпадающие метаданные дают ошибку. Ответ обработчика не
-содержит nonce, исходный токен или assertion.
-
-Proof не меняет локальную авторизацию и не получает access token. Это не команда
-install; повтор или поздняя доставка не должны создавать установку. Постоянное
-сохранение OAuth identity требует нового receiver со store, описанного ниже.
-Подтверждение работы после grant остаётся отдельным этапом.
-`Manifest.OAuthMigrationPath` объявляет отдельный HTTPS endpoint в camelCase поле
-`oauthMigrationUrl`; в backend адрес проверяется и сохраняется вместе с challenge.
-Platform sender принадлежит backend; SDK владеет приёмом и обращениями к auth.
-Контракт доступен начиная с SDK v0.37.0.
-Не публиковать endpoint в действующем контракте до готовности storage callback.
-
-`task test:migration-proof -- -race -v` проверяет подписи, recipient binding,
-повторы с новым jti, строгие receipts, redirects и удалённую установку. Общий
-фиксированный контракт проверяется также backend и auth-service; fixture —
-публичные тестовые данные, непригодные для доступа к рабочим окружениям.
-
-## Постоянный receiver proof/settings (v0.37.0)
-
-Для автоматической миграции вместо read-only `HandleMigrationProof` подключить
-`integrationoauth.NewMigrationReceiver(proofClient, store)`, затем
-`verifier.HandleMigration(receiver)` на `Manifest.OAuthMigrationPath`.
-Один endpoint принимает два протокола с разными доменами подписи: challenge v1
-и `aheron.oauth-migration-settings.v1`. Подпись и точная схема JSON проверяются
-перед любым вызовом store. Неизвестные поля, дубли, null, неверные типы и лишний
-JSON отклоняются; health-ответ не считается квитанцией.
-
-Store реализует `MigrationReceiverStore`:
-
-- `ReadMigrationInstallation(ctx, projectId)` читает текущую существующую строку
-  и возвращает снимок с integrationId/projectId, локальным Generation, известным
-  installationId, active, текущим legacy key и MigrationReceiverState.
-  Отсутствующая/удалённая строка — ErrRequest; ошибки базы сохраняют retryable характер.
-- `CompareAndSwapMigrationInstallation(ctx, before, after)` в serializable
-  транзакции перечитывает строку, сравнивает **весь** снимок, включая status,
-  credential, generation и migration state, и обновляет только migration state
-  и installationId. UPSERT, создание строки, активация и замена ключа запрещены.
-  Конфликт снимка возвращает ErrRequest, временная ошибка — ошибку зависимости.
-
-Generation — постоянный локальный идентификатор lifetime, который меняется при
-каждой переустановке, даже если platform installationId пока неизвестен. Нельзя
-подставлять только projectId или вычислять новое значение при чтении. Удаление
-очищает credential/settings и сохраняет обычный tombstone; ручные и legacy writers
-должны участвовать в тех же проверках состояния. Изменение схемы store и защита
-этих writers реализуются в репозитории конкретной интеграции, SDK не владеет её БД.
-
-Receiver сначала фиксирует pending-контекст challenge и hash текущего ключа,
-затем отправляет raw key напрямую доверенному auth endpoint. Поэтому даже потеря
-auth-ответа не оставляет последующую settings-команду без локальной привязки.
-Pending не утверждает успешный claim, не содержит nonce/raw key и не меняет identity.
-Backend независимо проверяет auth proof и создаёт grant до settings.
-
-Settings-команда содержит clientId/keyId/installationId, IDs/digest proof и версии
-доступа/политики. Endpoints и private key берутся только из конфигурации развёртывания.
-Receiver проверяет pending, прежний credential и все привязки, затем CAS сохраняет
-settings и identity. Точная квитанция `state=stored` возвращается после commit.
-Повтор читает актуальную строку и снова выполняет CAS: нельзя подтвердить запись
-из кеша после удаления или переустановки. Обратное изменение версий отклоняется.
-
-При старте процесса integration code загружает сохранённые settings и создаёт
-существующий OAuth Provider с deployment endpoints/private key и сохранёнными IDs.
-Этот wiring, application OAuth и проверки реальных фоновых/ресурсных операций
-ещё требуется подключить в интеграциях. Stored receipt подтверждает только запись,
-не разрешает receiverConfirmed/OAuth-only и не отзывает legacy key.
-
-Проверка SDK: `task test:migration-settings -- -race -v`. Реальный контракт с sender:
-`task test:migration-delivery:sdk` из соседнего backend (Windows, временный go.work,
-без изменения опубликованных зависимостей). Рабочие receiver stores ещё не подключены,
-публиковать endpoint и включать миграцию до их готовности нельзя.
+`DecodeRetainedInstallationIdentity` строго читает identities, записанные при
+завершённом переносе установок. Возвращаемый digest покрывает все сохранённые
+настройки и подходит для invalidation кеша. Это чтение действующих OAuth-данных;
+команд миграции, proof exchange и key fallback в SDK нет. Новый lifecycle
+атомарно сохраняет OAuth settings и очищает прежнее поле.

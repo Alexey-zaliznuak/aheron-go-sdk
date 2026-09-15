@@ -1,27 +1,16 @@
 package integration
 
 import (
-	"context"
-	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"testing/fstest"
-	"time"
-
-	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
 )
 
 func TestManifestResolvePathsAgainstPublicBaseURL(t *testing.T) {
 	m := Manifest{
 		ConsolePath:          "/console",
-		InstallPath:          "/install",
-		UninstallPath:        "/uninstall",
 		ActionPath:           "/api/actions",
 		TriggerSyncPath:      "/trigger-sync",
 		VariableValuesPath:   "/variable-values",
@@ -173,17 +162,12 @@ func TestIconFromFS(t *testing.T) {
 
 func TestManifestResolveKeepsAbsoluteAndOmittedEndpoints(t *testing.T) {
 	m := Manifest{
-		// An endpoint on another host stays as given.
-		InstallPath: "https://hooks.example.com/install",
-		Blocks:      []Block{{Key: "b", Kind: KindAction, Name: "B"}},
+		Blocks: []Block{{Key: "b", Kind: KindAction, Name: "B"}},
 	}
 
 	body, err := m.resolve("https://sheets.aheron.pro")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
-	}
-	if body.InstallURL != "https://hooks.example.com/install" {
-		t.Errorf("InstallURL = %q", body.InstallURL)
 	}
 	// An undeclared endpoint is omitted, which the platform reads as "clear it".
 	if body.ActionURL != "" || body.TriggerSyncURL != "" {
@@ -192,6 +176,33 @@ func TestManifestResolveKeepsAbsoluteAndOmittedEndpoints(t *testing.T) {
 	raw, _ := json.Marshal(body)
 	if strings.Contains(string(raw), "actionUrl") {
 		t.Errorf("empty actionUrl should be omitted: %s", raw)
+	}
+}
+
+func TestManifestEmissionOmitsRetiredLegacyEndpoints(t *testing.T) {
+	body, err := (Manifest{
+		InstallationLifecyclePath: "/installation-lifecycle",
+		ActionPath:                "/api/actions",
+		TriggerSyncPath:           "/trigger-sync",
+		Blocks:                    []Block{{Key: "b", Kind: KindAction, Name: "B"}},
+	}).resolve("https://integration.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(raw)
+	for _, field := range []string{"installUrl", "uninstallUrl", "oauthMigrationUrl"} {
+		if strings.Contains(encoded, field) {
+			t.Fatalf("emitted manifest contains retired field %q: %s", field, encoded)
+		}
+	}
+	for _, field := range []string{"installationLifecycleUrl", "actionUrl", "triggerSyncUrl"} {
+		if !strings.Contains(encoded, field) {
+			t.Fatalf("emitted manifest omitted active field %q: %s", field, encoded)
+		}
 	}
 }
 
@@ -240,171 +251,6 @@ func TestManifestResolveRejectsBadManifests(t *testing.T) {
 				t.Fatal("want error, got nil")
 			}
 		})
-	}
-}
-
-func TestCatalogSyncSignsAndPostsManifest(t *testing.T) {
-	pub, priv, _ := ed25519.GenerateKey(nil)
-
-	var gotBody []byte
-	var gotHeaders http.Header
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/integrations/self/sync" {
-			t.Errorf("path = %q", r.URL.Path)
-		}
-		gotBody, _ = io.ReadAll(r.Body)
-		gotHeaders = r.Header.Clone()
-		_, _ = w.Write([]byte(`{"changed":true,"version":4,"published":true}`))
-	}))
-	defer srv.Close()
-
-	client, err := New(Config{
-		IntegrationID: "11111111-1111-1111-1111-111111111111",
-		PrivateKey:    base64.StdEncoding.EncodeToString(priv),
-		CatalogURL:    srv.URL + "/api",
-		PublicBaseURL: "https://sheets.aheron.pro",
-	})
-	if err != nil {
-		t.Fatalf("new client: %v", err)
-	}
-
-	result, err := client.Catalog.Sync(context.Background(), Manifest{
-		ActionPath: "/api/actions",
-		Blocks:     []Block{{Key: "create-row", Kind: KindAction, Name: "Create row", Outputs: []string{"ok"}}},
-	})
-	if err != nil {
-		t.Fatalf("sync: %v", err)
-	}
-	if !result.Changed || result.Version != 4 || !result.Published {
-		t.Fatalf("result = %+v", result)
-	}
-
-	if got := gotHeaders.Get(sign.HeaderIntegrationID); got != "11111111-1111-1111-1111-111111111111" {
-		t.Errorf("integration id header = %q", got)
-	}
-	ts := gotHeaders.Get(sign.HeaderIntegrationTimestamp)
-	if err := sign.Verify(pub, ts, gotBody, gotHeaders.Get(sign.HeaderIntegrationSignature)); err != nil {
-		t.Errorf("signature does not cover the sent body: %v", err)
-	}
-
-	var sent manifestBody
-	if err := json.Unmarshal(gotBody, &sent); err != nil {
-		t.Fatalf("unmarshal sent body: %v", err)
-	}
-	if sent.ActionURL != "https://sheets.aheron.pro/api/actions" {
-		t.Errorf("sent ActionURL = %q", sent.ActionURL)
-	}
-	if len(sent.Blocks) != 1 || sent.Blocks[0].IframeURL != "https://sheets.aheron.pro/blocks/create-row" {
-		t.Errorf("sent blocks = %+v", sent.Blocks)
-	}
-}
-
-func TestCatalogSyncFailsBeforeSigningOnBadManifest(t *testing.T) {
-	_, priv, _ := ed25519.GenerateKey(nil)
-
-	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		t.Error("a manifest that cannot be resolved must not reach the platform")
-	}))
-	defer srv.Close()
-
-	client, err := New(Config{
-		IntegrationID: "11111111-1111-1111-1111-111111111111",
-		PrivateKey:    base64.StdEncoding.EncodeToString(priv),
-		CatalogURL:    srv.URL + "/api",
-	})
-	if err != nil {
-		t.Fatalf("new client: %v", err)
-	}
-
-	// Relative paths with no PublicBaseURL configured.
-	if _, err := client.Catalog.Sync(context.Background(), Manifest{ActionPath: "/api/actions"}); err == nil {
-		t.Fatal("want error, got nil")
-	}
-}
-
-// StartSync must survive a catalog that is briefly down: the integration keeps
-// serving the declarations it published earlier, so a failed sync is a retry and a
-// log line, not a reason to stop.
-func TestCatalogStartSyncRetriesUntilItSucceeds(t *testing.T) {
-	_, priv, _ := ed25519.GenerateKey(nil)
-
-	var calls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if calls.Add(1) == 1 {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		_, _ = w.Write([]byte(`{"changed":true,"version":8,"published":true}`))
-	}))
-	defer srv.Close()
-
-	client := newCatalogTestClient(t, priv, srv.URL)
-	client.Catalog.StartSync(context.Background(), Manifest{ActionPath: "/api/actions"})
-
-	if got := calls.Load(); got != 2 {
-		t.Fatalf("catalog was called %d times, want 2 (one failure then one success)", got)
-	}
-}
-
-// A pod being replaced cancels the start-up context. StartSync must return then
-// instead of holding the process through its whole retry schedule.
-func TestCatalogStartSyncStopsWhenContextIsCancelled(t *testing.T) {
-	_, priv, _ := ed25519.GenerateKey(nil)
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	client := newCatalogTestClient(t, priv, srv.URL)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	done := make(chan struct{})
-	go func() {
-		client.Catalog.StartSync(ctx, Manifest{ActionPath: "/api/actions"})
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("StartSync did not stop on a cancelled context")
-	}
-}
-
-func newCatalogTestClient(t *testing.T, priv ed25519.PrivateKey, baseURL string) *Client {
-	t.Helper()
-	client, err := New(Config{
-		IntegrationID: "11111111-1111-1111-1111-111111111111",
-		PrivateKey:    base64.StdEncoding.EncodeToString(priv),
-		CatalogURL:    baseURL + "/api",
-		PublicBaseURL: "https://sheets.aheron.pro",
-		// A 500 is not retried by the transport, so each attempt here is one call.
-		RetryCount: -1,
-	})
-	if err != nil {
-		t.Fatalf("new client: %v", err)
-	}
-	return client
-}
-
-func TestCatalogStartSyncStopsAfterSuccess(t *testing.T) {
-	_, priv, _ := ed25519.GenerateKey(nil)
-
-	var calls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		_, _ = w.Write([]byte(`{"changed":false,"version":7,"published":true}`))
-	}))
-	defer srv.Close()
-
-	client := newCatalogTestClient(t, priv, srv.URL)
-	client.Catalog.StartSync(context.Background(), Manifest{ActionPath: "/api/actions"})
-
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("catalog was called %d times, want exactly 1", got)
 	}
 }
 

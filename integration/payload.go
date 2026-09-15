@@ -7,7 +7,8 @@ package integration
 // placeholders {{context}}, {{actionKey}}, {{blockSettings}}, {{vars}} and
 // {{integrationContext}}. The integration therefore decodes the body into its
 // own struct with DecodeBody, embedding ExecutionContext wherever it templated
-// {{context}}. The install request, by contrast, has a fixed shape.
+// {{context}}. Trigger and variable requests retain fixed shapes for those
+// platform hooks.
 
 // ExecutionContext identifies a parked integrationAction step. The platform
 // substitutes it wherever the author's action_request_template references
@@ -32,23 +33,6 @@ type ExecutionContext struct {
 	ProjectID string  `json:"projectId,omitempty"`
 	SchemeID  string  `json:"schemeId,omitempty"`
 	StepID    string  `json:"stepId,omitempty"`
-}
-
-// InstallRequest is the fixed body the platform POSTs to the integration's
-// install_url when the integration is installed into a project. ProjectAPIKey is
-// the project API key the integration uses for CRM calls; it is delivered once,
-// on install, and the integration must persist it against ProjectID.
-type InstallRequest struct {
-	ProjectID     string `json:"projectId"`
-	ProjectAPIKey string `json:"projectApiKey"`
-}
-
-// UninstallRequest is the fixed body the platform POSTs to the integration's
-// uninstall_url when the integration is removed from a project. The integration
-// should drop its per-project state — most importantly the project API key it
-// stored on install — so it no longer acts on the project's behalf.
-type UninstallRequest struct {
-	ProjectID string `json:"projectId"`
 }
 
 // TriggerSyncRequest is the fixed body the platform POSTs to the integration's

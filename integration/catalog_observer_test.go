@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,8 +19,16 @@ func TestCatalogSyncObserverReportsPublishedAndDraftResults(t *testing.T) {
 		{`{"changed":true,"version":7,"published":false,"reason":"subflow"}`, false},
 	} {
 		_, priv, _ := ed25519.GenerateKey(nil)
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(tc.body)) }))
-		client := newCatalogTestClient(t, priv, server.URL)
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/oauth/token" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"access_token":"aho_app_` + base64.RawURLEncoding.EncodeToString(make([]byte, 32)) + `","token_type":"Bearer","expires_in":300,"scope":"catalog.write"}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(tc.body))
+		}))
+		client := newCatalogTestClient(t, priv, server.URL, server.Client())
 		calls := 0
 		client.Catalog.StartSyncWithObserver(context.Background(), Manifest{ActionPath: "/api/actions"}, func(result SyncResult) {
 			calls++

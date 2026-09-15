@@ -6,13 +6,13 @@ SDK для построения бэкендов интеграций Aheron н�
 - **Входящее** (платформа → интеграция): `Verifier` проверяет Ed25519-подпись
   платформы (по JWKS, выбор ключа по `kid`) и свежесть timestamp. `Handle`
   оборачивает эндпоинт `action_url` (тело проектирует автор — читается через
-  `DecodeBody` в свою структуру), а `HandleInstall` — эндпоинт `install_url`
-  (фиксированное тело `{projectId, projectApiKey}`). `HandleVariableValues`
+  `DecodeBody` в свою структуру). `HandleOAuthLifecycle` принимает подписанный
+  OAuth lifecycle-контракт, а `HandleVariableValues`
   обслуживает typed contract динамических значений переменных.
-- **Исходящее** (интеграция → платформа): `Client` дёргает подписанные эндпоинты
-  платформы (resolve шага, активация/список триггеров) — каждый вызов
-  подписывается приватным ключом интеграции — и содержит `CRM`-клиент для
-  чтения/записи данных субъекта по project API key.
+- **Исходящее** (интеграция → платформа): `Client` вызывает OAuth-эндпоинты
+  платформы для resolve шага, активации/списка триггеров и публикации каталога.
+  Явные project API keys остаются способом работы с пользовательскими
+  подключениями CRM, Files и Links.
 
 Помимо этого в SDK есть `outbox` — relay транзакционного outbox, не зависящий
 ни от какой БД (см. ниже).
@@ -24,12 +24,11 @@ SDK для построения бэкендов интеграций Aheron н�
 повтором после 401. [Подключение и границы OAuth](docs/integration-oauth.md).
 FilesOAuth разделяет OAuth-запросы media API и presigned S3 PUT;
 [конфигурация и жизненный цикл загрузки](docs/integration-oauth.md#files-media-api-и-загрузка-байтов).
-`integration.New` поддерживает опциональный `ExecutionOAuth` для Steps/Triggers
-`CRMOAuth` для всех CRM-методов, `FilesOAuth` для Files и `LinksOAuth` для проектных Links-методов. Без соответствующей настройки действует
-прежняя авторизация. ApplicationOAuth подключает Catalog.Sync и общий
+`integration.New` поддерживает `ExecutionOAuth` для Steps/Triggers,
+`CRMOAuth` для CRM-методов, `FilesOAuth` для Files и `LinksOAuth` для проектных
+Links-методов. ApplicationOAuth подключает Catalog.Sync и общий
 Links.RegisterCallback с отдельными правами приложения, без project/installation.
-OAuth-клиенты и постоянный receiver миграции доступны с v0.37.0.
-Подключение хранилищ и переключение реальных интеграций выполняются отдельно.
+Подключение хранилищ и lifecycle receiver выполняются в каждой интеграции.
 
 ## Установка
 
@@ -50,77 +49,32 @@ PostgreSQL. Ставится и версионируется независим�
   `X-Aheron-Timestamp` / `X-Aheron-Signature` / `X-Aheron-Key-Id`. Интеграция
   проверяет их публичным ключом из JWKS
   (`GET {origin}/.well-known/aheron-integration-jwks.json`).
-- Интеграция подписывает свои callback'и (resolve, активация, список) **своим**
-  приватным ключом и шлёт `X-Integration-Id` / `X-Integration-Timestamp` /
-  `X-Integration-Signature`. Платформа проверяет их зарегистрированным публичным
-  ключом интеграции.
-
-Канон подписи одинаковый в обе стороны: Ed25519 над `"<timestamp>.<body>"`.
+- Интеграция получает OAuth-токен, подписывая `private_key_jwt` своим ключом.
+  Ресурсные вызовы передают `Authorization: Bearer …`. Платформа проверяет
+  audience, права, проект, lifetime установки и актуальные поколения доступа.
+  Подписанные `X-Integration-*` запросы больше не поддерживаются.
 
 ## Быстрый старт
 
+Создайте общий OAuth Provider по [инструкции подключения](docs/integration-oauth.md).
+Для уже выданной и сохранённой привязки установки создайте клиента:
+
 ```go
-package main
-
-import (
-	"context"
-	"net/http"
-	"os"
-
-	"github.com/Alexey-zaliznuak/aheron-go-sdk/integration"
-	"github.com/Alexey-zaliznuak/aheron-go-sdk/integration/zaplog"
-	"go.uber.org/zap"
-)
-
-func main() {
-	logger, _ := zap.NewProduction()
-
-	client, _ := integration.New(integration.Config{
-		IntegrationID: os.Getenv("INTEGRATION_ID"),
-		PrivateKey:    os.Getenv("INTEGRATION_KEY"), // base64 seed(32) или полный ключ(64)
-		APIKey:        os.Getenv("AHERON_PROJECT_KEY"), // для CRM, опционально
-		Logger:        zaplog.New(logger),
-	})
-
-	verifier, _ := integration.NewVerifier(integration.VerifierConfig{
-		JWKSURL: os.Getenv("JWKS_URL"),
-		Logger:  zaplog.New(logger),
-	})
-
-	// Установка: платформа шлёт фиксированное {projectId, projectApiKey} —
-	// сохраните ключ, чтобы ходить в CRM от имени проекта.
-	http.Handle("/install", verifier.HandleInstall(
-		func(ctx context.Context, req integration.InstallRequest) error {
-			saveAPIKey(req.ProjectID, req.ProjectAPIKey)
-			return nil
-		},
-	))
-
-	// Единый action-эндпоинт (action_url версии). Тело вы проектируете сами в
-	// action_request_template; здесь декодируете его в свою структуру. В неё
-	// встройте integration.ExecutionContext там, где шаблон содержит {{context}},
-	// чтобы затем резолвить шаг.
-	http.Handle("/blocks/action", verifier.Handle(
-		func(ctx context.Context, r *http.Request) error {
-			var body struct {
-				integration.ExecutionContext             // {{context}}
-				ActionKey                    string      `json:"actionKey"`
-				Vars                         any         `json:"vars"`
-			}
-			if err := integration.DecodeBody(r, &body); err != nil {
-				return err
-			}
-			return client.Steps.Resolve(ctx, body.ExecutionContext, "ok", map[string]any{
-				"lastMessageId": "42", // subject-переменная по ключу
-			})
-		},
-	))
-
-	http.ListenAndServe(":8090", nil)
-}
+client, err := integration.New(integration.Config{
+    IntegrationID: integrationID,
+    ExecutionOAuth: &integration.ExecutionOAuthConfig{
+        Provider: provider,
+        ProjectID: projectID,
+        InstallationID: installationID,
+    },
+})
 ```
 
-Полный минимальный пример — в `examples/echo`.
+`projectID` и `installationID` берутся из доверенного хранилища lifecycle.
+Минимальный запускаемый пример для одной существующей установки —
+[`examples/echo`](examples/echo/main.go). Для нескольких проектов интеграция
+хранит OAuth settings вместе с lifecycle watermark и читает актуальную привязку
+перед каждым обращением к платформе.
 
 ## Конфигурация клиента
 
@@ -128,8 +82,7 @@ func main() {
 
 | Поле                                                       | Назначение                                                           | Дефолт                       |
 | ---------------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------- |
-| `IntegrationID`                                            | id интеграции (uuid), уходит в `X-Integration-Id`                    | —                            |
-| `PrivateKey`                                               | Ed25519 приватный ключ интеграции, base64 (seed 32б или полный 64б)  | —                            |
+| `IntegrationID`                                            | id интеграции (uuid), проверяется для каталога                    | —                            |
 | `APIKey`                                                   | project API key (`ahr_proj_...`) для CRM                             | —                            |
 | `ExecutionURL`                                             | база execution-service с префиксом шлюза `/api/execution`; эндпоинты интеграций под `/integrations/...` | `https://aheron.pro/api/execution` |
 | `CRMURL`                                                   | база CRM с префиксом шлюза `/api/crm`; вызовы бьют в `/projects/...` | `https://aheron.pro/api/crm` |
@@ -203,7 +156,7 @@ keyed-протоколе `variables` должны быть `nil`/пустыми,
 - `client.CRM.WithAPIKey(projectKey)` — дешёвая копия клиента с другим project API
   key поверх общего транспорта. Нужна, когда один процесс интеграции работает от
   имени многих проектов (у каждого свой ключ, выданный на install): держите один
-  базовый клиент без ключа и деривируйте `WithAPIKey(...)` на каждый вызов.
+  для явных пользовательских подключений можно создавать копию `WithAPIKey(...)`; установки интеграций используют `CRMOAuth`.
 
 Ветвление по ответу CRM: `integration.IsUnauthorized(err)` (401/403) и
 `integration.StatusCode(err)` (точный статус `*APIError`, напр. `409`).
@@ -237,10 +190,8 @@ keyed-протоколе `variables` должны быть `nil`/пустыми,
 - `verifier.Verify(next)` — middleware `net/http`: проверка подписи + timestamp.
 - `verifier.Handle(fn)` — хендлер `action_url`: проверка подписи + вызов `fn(ctx, r)`;
   тело читается через `integration.DecodeBody(r, &dst)`.
-- `verifier.HandleInstall(fn)` — хендлер `install_url`: проверка + декод фиксированного
-  `InstallRequest{ProjectID, ProjectAPIKey}` + вызов `fn`.
-- `verifier.HandleUninstall(fn)` — хендлер `uninstall_url`: проверка + декод
-  `UninstallRequest{ProjectID}` + вызов `fn` (удалите сохранённый project API key).
+- `verifier.HandleOAuthLifecycle(integrationID, fn)` — отдельный lifecycle-хендлер
+  для OAuth installation settings и упорядоченных install/uninstall событий.
 - `verifier.HandleTriggerSync(fn)` — хендлер `trigger_sync_url`: проверка + декод
   `TriggerSyncRequest{ProjectID, BlockKey, ConfigVersion}` + вызов `fn`
   (пересинхронизируйте локальные правила по версии).
@@ -336,89 +287,23 @@ http.Handle("/variable-values", verifier.HandleVariableValues(
 ))
 ```
 
-### Uninstall
+### OAuth lifecycle
 
-Платформа шлёт `POST` на `uninstall_url` при удалении интеграции из проекта.
-Тело фиксированное — `UninstallRequest{ProjectID}`. Очистите сохранённый на install
-project API key и остановите работу установки от имени проекта. Пользовательские
-подключения, аккаунты и историю сохраняйте. Ошибка `fn` → 500, платформа повторит
-доставку. Этот legacy-контракт не различает переустановки; новый описан ниже.
+Контракт `aheron.installation-lifecycle.v1` доставляет подписанные install/uninstall
+события с постоянным sequence и публичными `oauth` settings для install. SDK
+проверяет адресата, строгую JSON-схему, подпись и точную квитанцию; receiver должен
+атомарно сохранять настройки OAuth вместе с lifecycle watermark.
 
-```go
-http.Handle("/uninstall", verifier.HandleUninstall(
-	func(ctx context.Context, req integration.UninstallRequest) error {
-		return forgetProject(req.ProjectID) // очистить установочный credential
-	},
-))
-```
+`DecideLifecycle(current, request)` возвращает `applied`, `duplicate` или
+`superseded`, а конфликт одинакового sequence возвращает `ErrLifecycleConflict`.
+State сохраняется как tombstone после uninstall, чтобы поздние повторы не меняли
+новую установку. `ValidateLifecycleOAuth` сверяет сохранённые settings с digest
+исходного install-события.
 
-### Lifecycle с защитой переустановки
-
-Новый контракт `aheron.installation-lifecycle.v1` реализован в SDK отдельно от
-legacy `HandleInstall`/`HandleUninstall`. Он ещё не включён в платформе и интеграциях.
-Объявлять поддержку можно только после реализации постоянного состояния и
-транзакционного изменения установочного ключа у получателя.
-
-`LifecycleRequest` содержит protocol, eventId, integrationId, projectId,
-installationId, sequence, action (`install`/`uninstall`) и необязательный
-projectApiKey только для install. UUID записываются канонически в нижнем регистре.
-Sequence — постоянный счётчик пары (проект, интеграция) в backend, который
-**не сбрасывается при переустановке**. AccessVersion одной установки для этого
-не подходит. Повтор доставки сохраняет eventId, sequence и всё тело.
-
-Digest v1 — SHA-256 от `json.Marshal` валидного LifecycleRequest в порядке полей
-объявленной Go-структуры, без пробелов, с JSON escaping Go (включая HTML escaping)
-и пропуском пустого projectApiKey. Обе стороны вызывают метод Digest; независимый
-golden fixture фиксирует этот wire-инвариант. В JSON-парсере повторные поля,
-неверный регистр имён, null и неизвестные поля отклоняются.
-
-`verifier.HandleLifecycle(integrationID, svc.ApplyLifecycle)` возвращает
-`(http.Handler, error)` для отдельного POST URL. Он проверяет подпись по сырым
-байтам, адресата, строгую структуру JSON и результат обработчика; ответы имеют
-no-store. Не регистрируйте его по legacy install/uninstall URL. Старый получатель
-может проигнорировать новые поля и успеть изменить данные даже при непригодном
-ответе, поэтому fallback к старому endpoint запрещён.
-
-Подпись lifecycle — Ed25519 от байтов
-`aheron.installation-lifecycle.v1.<timestamp>.<rawBody>`. Префикс стоит **перед**
-timestamp и задаётся обработчиком, не выбирается из тела. JWKS и X-Aheron-*
-заголовки сохраняются, но обычная подпись `<timestamp>.<body>` не подходит.
-Это не даёт подписанному запросу блока с произвольным JSON стать lifecycle-командой.
-Обратная подмена также отклоняется: lifecycle-подпись не принимается legacy endpoint.
-
-Сервис/репозиторий получателя выполняет `DecideLifecycle(current, request)`
-**внутри serializable-транзакции**:
-
-- `applied`: атомарно сохраняет State и устанавливает/очищает ключ; install без
-  projectApiKey тоже очищает прежний ключ. Uninstall сохраняет запись без ключа.
-- `duplicate`: тот же номер и digest, без повторных эффектов.
-- `superseded`: уже применён больший номер, без изменения новой установки.
-- Тот же номер с другим телом — `ErrLifecycleConflict`; повреждённое сохранённое
-  состояние — `ErrLifecycleState`, его нельзя считать пустым.
-
-State хранится постоянно, включая запись об удалении: иначе поздний install
-оживит отозванный ключ. Не удаляйте вместе с uninstall пользовательские аккаунты,
-платежи, подключения и историю проекта. Все legacy/manual writers ключа должны
-отказывать для проекта, переведённого на этот контракт. Побочные эффекты вне БД
-требуют отдельной надёжной обработки; возвращать receipt до завершения требуемой
-очистки нельзя. Сам `DecideLifecycle` не сохраняет данные и не выдаёт прав.
-
-Платформа использует `NewLifecycleSender` с собственным Ed25519-ключом и `Deliver`.
-Одна попытка отправляет подписанное неизменное тело и принимает только HTTP 200
-с точной `LifecycleReceipt`: совпадают все IDs, sequence, digest, outcome и
-observedSequence. HTTP 202, пустой 200, другая квитанция и редиректы — ошибки.
-HTTPS обязателен по умолчанию; AllowHTTP включается явно для локального контура.
-URL берётся из принятого и проверенного контракта установки, не из текущего
-изменяемого каталога. Отправитель не выбирает адрес, не создаёт очередь и не
-повторяет запрос сам: это ответственность постоянного задания backend.
-
-Обработчик возвращает 400 для неверного сообщения, 401 для неверной подписи,
-403 для другого адресата, 405 для другого метода, 409 для конфликта и 503 при
-ошибке обработки/неверной квитанции. Ошибки доставки не содержат тела, ключей,
-произвольного текста ответа или URL. Токены нельзя писать в аудит/квитанции;
-в них хранится только digest. `task test:lifecycle` проверяет все перестановки
-install/uninstall, конкурирующие повторы, защиту переустановки и HTTP-контракт.
-
+`verifier.HandleOAuthLifecycle(integrationID, fn)` регистрируется на отдельном
+POST URL. Lifecycle подписывается доменным Ed25519-префиксом и использует JWKS
+платформы; обычная подпись action-запроса для него не подходит. Платформа отправляет
+сообщение через `NewLifecycleSender` и принимает только точную `LifecycleReceipt`.
 ### Trigger sync
 
 После изменения конфигурации триггер-блоков проекта платформа шлёт `POST` на
@@ -493,8 +378,7 @@ UI платформы, и сама публикует декларацию че�
 func Manifest() integration.Manifest {
 	return integration.Manifest{
 		ConsolePath:        "/console",
-		InstallPath:        "/install",
-		UninstallPath:      "/uninstall",
+		InstallationLifecyclePath: "/installation-lifecycle",
 		ActionPath:         "/api/actions",
 		TriggerSyncPath:    "/trigger-sync",
 		VariableValuesPath: "/variable-values",
@@ -650,7 +534,7 @@ relay := outbox.NewRelayWithOptions(store, outbox.PublisherFunc(
             // moving precisely this row to dead letters.
             return outbox.Permanent(err)
         default:
-            // Untyped failures retain the Store's bounded legacy budget.
+            // Untyped failures retain the Store's bounded retry budget.
             return err
         }
     }),
@@ -830,66 +714,12 @@ Certificate verification remains enabled.
 ### Lifecycle catalog declaration
 
 `Manifest.InstallationLifecyclePath` resolves to `installationLifecycleUrl` in
-catalog self-sync. Its presence declares `aheron.installation-lifecycle.v1` with
-durable ordering and credential fencing. It must use a dedicated endpoint,
-distinct from `InstallPath` and `UninstallPath`; omission preserves the legacy
-manifest wire shape. Deploy the catalog field and receiver migrations before
-advertising this capability. The backend pins the HTTPS destination in the
-accepted permission revision; a declaration does not migrate or authorize any
-existing installation by itself.
+catalog self-sync. It declares the dedicated OAuth lifecycle endpoint. Retired
+install, uninstall and migration URLs are not emitted in the current snapshot;
+historical published revisions remain owned by the platform.
+### OAuth installation settings
 
-
-### Migration possession proof (unreleased)
-
-`integrationoauth.NewMigrationProofClient` and `Verifier.HandleMigrationProof`
-implement a separate signed challenge endpoint for existing installations.
-The client sends Ed25519 private_key_jwt and the current legacy credential to a
-pinned HTTPS auth endpoint, validates the exact claimed receipt, and never
-creates or activates an installation. Endpoint declaration, platform delivery
-and durable OAuth receiver identity still require rollout integration.
-See [the protocol and storage callback contract](docs/integration-oauth.md).
-Run `task test:migration-proof -- -race -v`; `test:oauth`, `vet` and `build`
-also passed locally. Test fixtures contain a public test key and fake credential.
-
-
-Migration receiver объявляется через `Manifest.OAuthMigrationPath` (на платформе
-`oauthMigrationUrl`). Это отдельный HTTPS endpoint без query/fragment, отличный
-от install/uninstall/lifecycle. Обработчик — `Verifier.HandleMigrationProof`,
-проверяющий подписанную команду до чтения текущего credential. Platform sender
-принадлежит backend; контракт проверяется командой `task test:migration-delivery:sdk` из backend
-с локальным SDK, без изменения production dependency. Подробности и ограничения
-storage callback: [Integration OAuth](docs/integration-oauth.md#proof-при-миграции-существующей-установки).
-
-### Durable migration settings (unreleased)
-
-`integrationoauth.NewMigrationReceiver(proofClient, store)` and
-`Verifier.HandleMigration(receiver)` extend the migration endpoint with durable
-proof binding and signed OAuth settings. The mandatory `MigrationReceiverStore`
-compares the complete existing installation snapshot in a transaction, including
-its local generation, active status and credential. The receiver never creates
-or activates an installation. It records pending context before auth HTTP, and
-returns `stored` only after the settings commit. Lost replies can be retried;
-deletion, reinstall and conflicting commands are rejected.
-
-Settings contain identity and access versions; private keys and trusted endpoints
-remain deployment configuration. A stored receipt does not prove OAuth operations
-or authorize cutover. Integration stores, runtime wiring and an SDK release are
-still required. See the [store contract](docs/integration-oauth.md#постоянный-receiver-proofsettings-unreleased).
-Run `task test:migration-settings -- -race -v` and the backend's real SDK contract task.
-
-### Новые установки через OAuth
-
-`LifecycleRequest.oauth` содержит `integrationoauth.InstallationSettings`: публичные
-идентификаторы клиента/ключа/установки, поколения доступа и принятую policy.
-API-ключ, client secret, private key и URL в нём отсутствуют. `oauth` допустим
-только для install и несовместим с projectApiKey. Старые сообщения сохраняют digest.
-Получатель явно включает `HandleOAuthLifecycle` после обновления хранилища;
-обычный `HandleLifecycle` отклоняет OAuth даже после обновления SDK.
-
-Получатель сохраняет настройки вместе с lifecycle watermark, очищает прежний
-API-ключ и migration state; uninstall очищает настройки в той же транзакции.
-Повтор не меняет состояние, более старое сообщение возвращает superseded.
-`ValidateLifecycleOAuth` проверяет настройки по digest точного install-события
-при чтении для исходящих запросов. Runtime не должен переключаться на legacy
-при ошибке OAuth. `task test:lifecycle -- -race` проверяет эти границы и строгий
-JSON, включая вложенные duplicate/unknown/null поля.
+`LifecycleRequest.oauth` содержит публичные идентификаторы клиента, установки,
+версии доступа и принятую policy. Секреты и URL в сообщении отсутствуют. Settings
+сохраняются вместе с lifecycle watermark, а `ValidateLifecycleOAuth` сверяет их
+с digest исходного install-события при каждом runtime чтении.

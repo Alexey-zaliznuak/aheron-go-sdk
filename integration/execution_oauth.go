@@ -16,7 +16,7 @@ import (
 
 // ExecutionOAuthConfig binds one SDK client to a project installation. Reuse
 // Provider across installations to share its bounded token cache. Resource
-// transport settings are independent of legacy Resty retries.
+// transport settings are independent of the OAuth token client.
 type ExecutionOAuthConfig struct {
 	Provider       *integrationoauth.Provider
 	ProjectID      string

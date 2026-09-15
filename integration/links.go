@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/integrationoauth"
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/httpclient"
-	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/sign"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -20,7 +19,6 @@ type LinksClient struct {
 	oauth               *linksOAuth
 	http                *httpclient.Client
 	baseURL, id, apiKey string
-	signer              *sign.Signer
 }
 
 // WithAPIKey preserves an explicit LinksOAuth installation binding.
@@ -111,29 +109,10 @@ func (c *LinksClient) call(ctx context.Context, method, path, key string, in, ou
 	if key != "" {
 		headers["Idempotency-Key"] = key
 	}
-	if c.signer != nil && c.id != "" {
-		base, e := url.Parse(strings.TrimRight(c.baseURL, "/"))
-		if e != nil {
-			return e
-		}
-		full, e := url.Parse(strings.TrimRight(c.baseURL, "/") + path)
-		if e != nil {
-			return e
-		}
-		if base.RawQuery != "" || base.Fragment != "" {
-			return fmt.Errorf("links: base URL must not contain query/fragment")
-		}
-		prefix := fmt.Sprintf("links-request-v1\n%s\n%s\n%s\n", method, full.RequestURI(), key)
-		ts, sig := c.signer.Sign(append([]byte(prefix), body...), time.Now())
-		headers[sign.HeaderIntegrationID] = c.id
-		headers[sign.HeaderIntegrationTimestamp] = ts
-		headers[sign.HeaderIntegrationSignature] = sig
-	} else {
-		if c.apiKey == "" {
-			return errNoAPIKey
-		}
-		headers["Authorization"] = "Bearer " + c.apiKey
+	if c.apiKey == "" {
+		return errNoAPIKey
 	}
+	headers["Authorization"] = "Bearer " + c.apiKey
 	resp, err := c.http.Do(ctx, httpclient.Request{Method: method, Path: path, Headers: headers, Body: body, Idempotent: idempotent})
 	if err != nil {
 		return err
@@ -189,18 +168,7 @@ func (c *LinksClient) RegisterCallback(ctx context.Context, key string, in LinkE
 		}
 		return out, nil
 	}
-	if c.oauth != nil {
-		return LinkEndpoint{}, integrationoauth.ErrRequest
-	}
-	var out LinkEndpoint
-	if !regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`).MatchString(key) {
-		return out, fmt.Errorf("links: invalid endpoint key")
-	}
-	if c.signer == nil || c.id == "" {
-		return out, errNoSigner
-	}
-	e := c.call(ctx, "PUT", "/integrations/self/link-callbacks/"+key, "", in, &out, true)
-	return out, e
+	return LinkEndpoint{}, integrationoauth.ErrRequest
 }
 func (c *LinksClient) List(ctx context.Context, project, cursor string, limit int) (LinkPage, error) {
 	var out LinkPage

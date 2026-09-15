@@ -14,11 +14,10 @@
 //     X-Integration-Id / X-Integration-Timestamp / X-Integration-Signature. The
 //     platform verifies it with the integration's registered public key.
 //
-// Legacy signatures are Ed25519 over the canonical bytes "<timestamp>.<body>",
+// Request signatures are Ed25519 over the canonical bytes "<timestamp>.<body>",
 // where timestamp is the unix-seconds string carried in the matching header and
-// body is the exact raw request body. Both sides also check timestamp freshness
-// against a narrow window to blunt replay. Lifecycle messages use a domain
-// prefix BEFORE the timestamp; see SignDomain and VerifyDomain.
+// body is the exact raw request body. Lifecycle messages use a domain prefix
+// BEFORE the timestamp; see SignDomain and VerifyDomain.
 package sign
 
 import (
@@ -127,46 +126,4 @@ func CheckTimestamp(timestamp string, window time.Duration, now time.Time) error
 		return fmt.Errorf("%w: timestamp is %s away from now", ErrStaleTimestamp, delta)
 	}
 	return nil
-}
-
-// ParsePrivateKey decodes a base64 (std encoding) Ed25519 private key. It accepts
-// either a full 64-byte private key or a 32-byte seed (from which the full key is
-// derived). An empty string yields a nil key and no error so callers can treat
-// "key not configured" as a soft state.
-func ParsePrivateKey(b64 string) (ed25519.PrivateKey, error) {
-	if b64 == "" {
-		return nil, nil
-	}
-	raw, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil {
-		return nil, fmt.Errorf("%w: private key base64: %v", ErrMalformed, err)
-	}
-	switch len(raw) {
-	case ed25519.PrivateKeySize:
-		return ed25519.PrivateKey(raw), nil
-	case ed25519.SeedSize:
-		return ed25519.NewKeyFromSeed(raw), nil
-	default:
-		return nil, fmt.Errorf("%w: private key must be %d or %d bytes, got %d", ErrMalformed, ed25519.PrivateKeySize, ed25519.SeedSize, len(raw))
-	}
-}
-
-// Signer timestamps and signs an outgoing request body with an Ed25519 private
-// key in one call. It is safe for concurrent use.
-type Signer struct {
-	priv ed25519.PrivateKey
-}
-
-// NewSigner wraps a private key. priv must be a valid Ed25519 private key.
-func NewSigner(priv ed25519.PrivateKey) *Signer {
-	return &Signer{priv: priv}
-}
-
-// Sign produces the timestamp/signature pair for body at time now. The returned
-// timestamp must be sent in the timestamp header and signature in the signature
-// header so the verifier reconstructs the same canonical input.
-func (s *Signer) Sign(body []byte, now time.Time) (timestamp string, signature string) {
-	timestamp = FormatTimestamp(now)
-	signature = Sign(s.priv, timestamp, body)
-	return timestamp, signature
 }
