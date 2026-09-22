@@ -325,10 +325,6 @@ INTEGRATION_APPLICATION_OAUTH_ENABLED=true в backend/link-service. Их рес�
 `task test`, `task vet`, `task build` проверяют оба SDK-модуля; существующие
 YDB-тесты второго модуля используют только локальную базу.
 
-## Сохранённые OAuth identities
-
-`DecodeRetainedInstallationIdentity` строго читает identities, записанные при
-завершённом переносе установок. Возвращаемый digest покрывает все сохранённые
-настройки и подходит для invalidation кеша. Это чтение действующих OAuth-данных;
-команд миграции, proof exchange и key fallback в SDK нет. Новый lifecycle
-атомарно сохраняет OAuth settings и очищает прежнее поле.
+OAuth installation settings are delivered by the durable lifecycle endpoint and
+validated against the current installation lifetime. Migration state is not part
+of the SDK runtime contract.
