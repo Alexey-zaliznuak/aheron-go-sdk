@@ -21,7 +21,7 @@ package integration
 // the subject to an external messenger user it already stores). They are omitted
 // from the resolve call, which correlates only by (ID, Version).
 //
-// SchemeID and StepID identify where the context was parked. They are not
+// SchemeID, BranchID and StepID identify where the context was parked. They are not
 // needed for a regular Resolve, but integrations may use SchemeID for
 // per-scheme configuration, while StepsClient.Reactivate requires StepID to
 // re-enter this step's output after the context has moved on.
@@ -32,6 +32,7 @@ type ExecutionContext struct {
 	SubjectID string  `json:"subjectId,omitempty"`
 	ProjectID string  `json:"projectId,omitempty"`
 	SchemeID  string  `json:"schemeId,omitempty"`
+	BranchID  string  `json:"branchId,omitempty"`
 	StepID    string  `json:"stepId,omitempty"`
 }
 
