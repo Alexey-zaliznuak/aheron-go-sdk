@@ -19,13 +19,14 @@ type StepsClient struct {
 }
 
 type resolveBody struct {
-	ExecutionContextID string         `json:"executionContextId"`
-	ContextVersion     int64          `json:"contextVersion"`
-	Output             string         `json:"output"`
-	Variables          map[string]any `json:"variables,omitempty"`
-	Mode               string         `json:"mode,omitempty"`
-	StepID             string         `json:"stepId,omitempty"`
-	IdempotencyKey     string         `json:"idempotencyKey,omitempty"`
+	ExecutionContextID string          `json:"executionContextId"`
+	ContextVersion     int64           `json:"contextVersion"`
+	Output             string          `json:"output"`
+	Variables          map[string]any  `json:"variables,omitempty"`
+	Mode               string          `json:"mode,omitempty"`
+	StepID             string          `json:"stepId,omitempty"`
+	IdempotencyKey     string          `json:"idempotencyKey,omitempty"`
+	Metadata           json.RawMessage `json:"metadata,omitempty"`
 }
 
 // ResolveOptions controls optional delivery guarantees for ResolveWithOptions
@@ -35,6 +36,8 @@ type resolveBody struct {
 // conflict.
 type ResolveOptions struct {
 	IdempotencyKey string
+	// Metadata replaces this integration's namespace in the branch metadata.
+	Metadata json.RawMessage
 }
 
 // Resolve advances a parked integrationAction context through the chosen output.
@@ -74,6 +77,7 @@ func (c *StepsClient) ResolveWithOptions(ctx context.Context, ec ExecutionContex
 		Output:             output,
 		Variables:          variables,
 		IdempotencyKey:     options.IdempotencyKey,
+		Metadata:           options.Metadata,
 	})
 	if err != nil {
 		return fmt.Errorf("integration: marshal resolve: %w", err)
@@ -124,6 +128,7 @@ func (c *StepsClient) ReactivateWithOptions(ctx context.Context, ec ExecutionCon
 		Mode:               "reactivate",
 		StepID:             ec.StepID,
 		IdempotencyKey:     options.IdempotencyKey,
+		Metadata:           options.Metadata,
 	})
 	if err != nil {
 		return fmt.Errorf("integration: marshal reactivate: %w", err)

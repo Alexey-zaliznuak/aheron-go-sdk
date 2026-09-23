@@ -59,6 +59,7 @@ func TestExecutionOAuthTypedMethods(t *testing.T) {
 	tokens := map[string]string{}
 	calls := map[string]int{}
 	issues := 0
+	metadataResolveSeen := false
 	c, _ := executionOAuthFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -92,6 +93,9 @@ func TestExecutionOAuthTypedMethods(t *testing.T) {
 			if scope != expected {
 				t.Errorf("resolve scope=%s", scope)
 			}
+			if len(body.Metadata) > 0 {
+				metadataResolveSeen = string(body.Metadata) == `{"startEvent":{"id":"new"}}`
+			}
 			w.WriteHeader(202)
 			_, _ = w.Write([]byte(`{"status":"accepted"}`))
 		case "/api/execution/integrations/triggers/activate":
@@ -121,6 +125,9 @@ func TestExecutionOAuthTypedMethods(t *testing.T) {
 	if err := c.Steps.ReactivateWithOptions(ctx, ec, "ok", nil, ResolveOptions{IdempotencyKey: "stable"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := c.Steps.ResolveWithOptions(ctx, ec, "ok", nil, ResolveOptions{Metadata: json.RawMessage(`{"startEvent":{"id":"new"}}`)}); err != nil {
+		t.Fatal(err)
+	}
 	ids, err := c.Triggers.Activate(ctx, ActivateParams{ProjectID: executionOAuthProject, SubjectID: "subject", ActivationKey: "go"})
 	if err != nil || len(ids) != 1 {
 		t.Fatalf("activate: %v", err)
@@ -134,13 +141,15 @@ func TestExecutionOAuthTypedMethods(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if issues != 3 || calls["/api/execution/integrations/resolve"] != 3 || calls["/api/execution/integrations/triggers"] != 2 {
+	if issues != 3 || calls["/api/execution/integrations/resolve"] != 4 || calls["/api/execution/integrations/triggers"] != 2 || !metadataResolveSeen {
 		t.Fatalf("cache/scopes requests issues=%d calls=%v", issues, calls)
 	}
 }
 
 func TestExecutionOAuthTriggerEventAndSuppression(t *testing.T) {
 	var gotEvent ActivationEvent
+	var gotMetadata json.RawMessage
+	var gotIdempotencyKey string
 	c, _ := executionOAuthFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/oauth/token" {
 			executionOAuthIssue(t, w, r, 1)
@@ -160,6 +169,8 @@ func TestExecutionOAuthTriggerEventAndSuppression(t *testing.T) {
 		} else {
 			gotEvent = *body.Event
 		}
+		gotMetadata = body.Metadata
+		gotIdempotencyKey = body.IdempotencyKey
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte(`{"executionContextIds":[],"matchedTriggers":1,"skippedOnce":1}`))
@@ -167,6 +178,7 @@ func TestExecutionOAuthTriggerEventAndSuppression(t *testing.T) {
 	result, err := c.Triggers.ActivateDetailed(t.Context(), ActivateParams{
 		ProjectID: executionOAuthProject, SubjectID: "subject", ActivationKey: "comment",
 		Event: &ActivationEvent{EventID: "instagram:1", Kind: "messengers.postComment", Version: 1, Data: json.RawMessage(`{"commentId":"1"}`)},
+		Metadata: json.RawMessage(`{"startEvent":{"id":"instagram:1"}}`), IdempotencyKey: "instagram:1",
 	})
 	if err != nil {
 		t.Fatalf("activate detailed: %v", err)
@@ -176,6 +188,9 @@ func TestExecutionOAuthTriggerEventAndSuppression(t *testing.T) {
 	}
 	if gotEvent.EventID != "instagram:1" || string(gotEvent.Data) != `{"commentId":"1"}` {
 		t.Fatalf("activation event = %+v", gotEvent)
+	}
+	if string(gotMetadata) != `{"startEvent":{"id":"instagram:1"}}` || gotIdempotencyKey != "instagram:1" {
+		t.Fatalf("metadata/idempotency key = %s / %q", gotMetadata, gotIdempotencyKey)
 	}
 }
 

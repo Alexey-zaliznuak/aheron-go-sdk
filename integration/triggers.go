@@ -37,6 +37,10 @@ type ActivateParams struct {
 	IntegrationSubjectType string
 	IntegrationSubjectID   string
 	Event                  *ActivationEvent
+	// Metadata is this integration's namespace object. The platform places it
+	// under context.metadata.<integrationSlug> on the activated branch.
+	Metadata       json.RawMessage
+	IdempotencyKey string
 }
 
 // ActivationEvent is an immutable, bounded event snapshot attached to the
@@ -63,6 +67,8 @@ type activateBody struct {
 	IntegrationSubjectType string           `json:"integrationSubjectType,omitempty"`
 	IntegrationSubjectID   string           `json:"integrationSubjectId,omitempty"`
 	Event                  *ActivationEvent `json:"event,omitempty"`
+	Metadata               json.RawMessage  `json:"metadata,omitempty"`
+	IdempotencyKey         string           `json:"idempotencyKey,omitempty"`
 }
 
 // Activate fires the matching trigger(s) and returns the ids of the trigger
@@ -98,6 +104,8 @@ func (c *TriggersClient) ActivateDetailed(ctx context.Context, p ActivateParams)
 		IntegrationSubjectType: p.IntegrationSubjectType,
 		IntegrationSubjectID:   p.IntegrationSubjectID,
 		Event:                  p.Event,
+		Metadata:               p.Metadata,
+		IdempotencyKey:         p.IdempotencyKey,
 	})
 	if err != nil {
 		return ActivationResult{}, fmt.Errorf("integration: marshal activate: %w", err)
