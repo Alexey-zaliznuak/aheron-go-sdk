@@ -36,18 +36,33 @@ type ActivateParams struct {
 	SubjectID              string
 	IntegrationSubjectType string
 	IntegrationSubjectID   string
+	Event                  *ActivationEvent
+}
+
+// ActivationEvent is an immutable, bounded event snapshot attached to the
+// activated execution context. The platform owns its envelope, while Data is
+// interpreted only by the integration that sent it.
+type ActivationEvent struct {
+	EventID string          `json:"eventId"`
+	Kind    string          `json:"kind"`
+	Version int             `json:"version"`
+	Data    json.RawMessage `json:"data"`
+}
+
+type ActivationResult struct {
+	ExecutionContextIDs []string `json:"executionContextIds"`
+	MatchedTriggers     int      `json:"matchedTriggers"`
+	SkippedOnce         int      `json:"skippedOnce"`
+	SkippedDuplicate    int      `json:"skippedDuplicate"`
 }
 
 type activateBody struct {
-	ProjectID              string `json:"projectId"`
-	ActivationKey          string `json:"activationKey"`
-	SubjectID              string `json:"subjectId,omitempty"`
-	IntegrationSubjectType string `json:"integrationSubjectType,omitempty"`
-	IntegrationSubjectID   string `json:"integrationSubjectId,omitempty"`
-}
-
-type activateResponse struct {
-	ExecutionContextIDs []string `json:"executionContextIds"`
+	ProjectID              string           `json:"projectId"`
+	ActivationKey          string           `json:"activationKey"`
+	SubjectID              string           `json:"subjectId,omitempty"`
+	IntegrationSubjectType string           `json:"integrationSubjectType,omitempty"`
+	IntegrationSubjectID   string           `json:"integrationSubjectId,omitempty"`
+	Event                  *ActivationEvent `json:"event,omitempty"`
 }
 
 // Activate fires the matching trigger(s) and returns the ids of the trigger
@@ -56,16 +71,24 @@ type activateResponse struct {
 // additionally checks subject ownership and does not automatically retry this
 // write.
 func (c *TriggersClient) Activate(ctx context.Context, p ActivateParams) ([]string, error) {
+	result, err := c.ActivateDetailed(ctx, p)
+	return result.ExecutionContextIDs, err
+}
+
+// ActivateDetailed also reports whether a matching trigger was suppressed by
+// its once-per-subject policy. A zero-ID result is not necessarily an unknown
+// activation key.
+func (c *TriggersClient) ActivateDetailed(ctx context.Context, p ActivateParams) (ActivationResult, error) {
 	if p.ProjectID == "" {
-		return nil, fmt.Errorf("integration: Activate requires ProjectID")
+		return ActivationResult{}, fmt.Errorf("integration: Activate requires ProjectID")
 	}
 	if p.ActivationKey == "" {
-		return nil, fmt.Errorf("integration: Activate requires ActivationKey")
+		return ActivationResult{}, fmt.Errorf("integration: Activate requires ActivationKey")
 	}
 	bySubjectID := p.SubjectID != ""
 	byExternalID := p.IntegrationSubjectID != ""
 	if bySubjectID == byExternalID {
-		return nil, fmt.Errorf("integration: Activate requires exactly one of SubjectID or IntegrationSubjectID")
+		return ActivationResult{}, fmt.Errorf("integration: Activate requires exactly one of SubjectID or IntegrationSubjectID")
 	}
 
 	body, err := json.Marshal(activateBody{
@@ -74,23 +97,24 @@ func (c *TriggersClient) Activate(ctx context.Context, p ActivateParams) ([]stri
 		SubjectID:              p.SubjectID,
 		IntegrationSubjectType: p.IntegrationSubjectType,
 		IntegrationSubjectID:   p.IntegrationSubjectID,
+		Event:                  p.Event,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("integration: marshal activate: %w", err)
+		return ActivationResult{}, fmt.Errorf("integration: marshal activate: %w", err)
 	}
 
 	if c.oauth == nil {
-		return nil, fmt.Errorf("integration: execution OAuth is required for Activate")
+		return ActivationResult{}, fmt.Errorf("integration: execution OAuth is required for Activate")
 	}
 	if p.ProjectID != c.oauth.projectID {
-		return nil, integrationoauth.ErrRequest
+		return ActivationResult{}, integrationoauth.ErrRequest
 	}
-	var out activateResponse
+	var out ActivationResult
 	err = c.oauth.call(ctx, c.oauth.triggers, http.MethodPost, activatePath, nil, body, false, http.StatusAccepted, &out)
 	if err == nil && out.ExecutionContextIDs == nil {
-		return nil, errExecutionOAuthResponse
+		return ActivationResult{}, errExecutionOAuthResponse
 	}
-	return out.ExecutionContextIDs, err
+	return out, err
 }
 
 // TriggerActivation is one declared activationKey -> outputKey mapping of a

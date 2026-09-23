@@ -139,6 +139,46 @@ func TestExecutionOAuthTypedMethods(t *testing.T) {
 	}
 }
 
+func TestExecutionOAuthTriggerEventAndSuppression(t *testing.T) {
+	var gotEvent ActivationEvent
+	c, _ := executionOAuthFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/oauth/token" {
+			executionOAuthIssue(t, w, r, 1)
+			return
+		}
+		if r.URL.Path != "/api/execution/integrations/triggers/activate" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body activateBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode activation: %v", err)
+		}
+		if body.Event == nil {
+			t.Error("activation event missing")
+		} else {
+			gotEvent = *body.Event
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"executionContextIds":[],"matchedTriggers":1,"skippedOnce":1}`))
+	})
+	result, err := c.Triggers.ActivateDetailed(t.Context(), ActivateParams{
+		ProjectID: executionOAuthProject, SubjectID: "subject", ActivationKey: "comment",
+		Event: &ActivationEvent{EventID: "instagram:1", Kind: "messengers.postComment", Version: 1, Data: json.RawMessage(`{"commentId":"1"}`)},
+	})
+	if err != nil {
+		t.Fatalf("activate detailed: %v", err)
+	}
+	if result.MatchedTriggers != 1 || result.SkippedOnce != 1 || len(result.ExecutionContextIDs) != 0 {
+		t.Fatalf("suppression result = %+v", result)
+	}
+	if gotEvent.EventID != "instagram:1" || string(gotEvent.Data) != `{"commentId":"1"}` {
+		t.Fatalf("activation event = %+v", gotEvent)
+	}
+}
+
 func TestExecutionOAuthRetriesAndNoFallback(t *testing.T) {
 	for _, name := range []string{"list401", "activate401", "resolve401", "keyed401", "reactivate401", "forbidden", "unavailable", "tokenRejected"} {
 		t.Run(name, func(t *testing.T) {
