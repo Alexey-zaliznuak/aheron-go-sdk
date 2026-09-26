@@ -22,7 +22,7 @@ func TestCatalogSyncObserverReportsPublishedAndDraftResults(t *testing.T) {
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/oauth/token" {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"access_token":"aho_app_` + base64.RawURLEncoding.EncodeToString(make([]byte, 32)) + `","token_type":"Bearer","expires_in":300,"scope":"catalog.write"}`))
+				_, _ = w.Write([]byte(`{"access_token":"aho_app_` + base64.RawURLEncoding.EncodeToString(make([]byte, 32)) + `","token_type":"Bearer","expires_in":300}`))
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
