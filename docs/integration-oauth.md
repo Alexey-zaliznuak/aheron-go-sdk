@@ -292,18 +292,19 @@ client, err := integration.New(integration.Config{
 })
 ```
 
-Provider может быть общим с установочными клиентами. Для Catalog.Sync запрашивается
-audience catalog / catalog.write; для Links.RegisterCallback — links /
-links.callbacks.write. Эти права платформа выдаёт клиенту отдельно от согласий
-проектов. IntegrationID в этой конфигурации не нужен:
-владельца каталога/endpoint определяет сервер по проверенному токену.
+Provider может быть общим с установочными клиентами. Catalog.Sync использует
+audience `catalog`, а Links.RegisterCallback — `links`. У application-токенов
+нет scopes и отдельной выдачи прав: сервис проверяет зарегистрированный client,
+audience и разрешённую для интеграции операцию. IntegrationID в конфигурации не
+нужен: владельца каталога/endpoint определяет сервер по проверенному токену.
 
-Низкоуровневый API: Provider.ApplicationToken(ctx, ApplicationRequest{Audience,
-Scopes}), InvalidateApplication и NewApplicationClient(ApplicationClientConfig).
+Низкоуровневый API: Provider.ApplicationToken(ctx, ApplicationRequest{Audience}),
+InvalidateApplication и NewApplicationClient(ApplicationClientConfig).
 ApplicationRequest не содержит projectId/installationId. В token form передаётся
 tokenKind=application, идентификаторы проекта/установки отсутствуют, включая пустые.
 Application token имеет префикс aho_app_; ответ с установочным aho_ отвергается
-и наоборот. Кэш/singleflight различают профиль, audience и точный набор scopes.
+и наоборот. Кэш/singleflight разделены по профилю и audience. Запрос не содержит
+scope; OAuth-ответ может не содержать поле scope.
 
 Оба management-метода объявляют желаемое состояние и допускают один повтор после
 401 с новым токеном и тем же телом. 403/5xx/ошибка транспорта возвращаются без
@@ -311,10 +312,8 @@ Application token имеет префикс aho_app_; ответ с устано
 ограниченный цикл повторов декларации при старте. WithAPIKey не отключает OAuth.
 Ошибки не содержат ответ upstream; успешный JSON ограничен 1 MiB.
 
-Перед включением интеграции нужны application grant в auth-service и
-INTEGRATION_APPLICATION_OAUTH_ENABLED=true в backend/link-service. Их ресурсные
-флаги независимы от установочного OAuth; в auth-service application-флаг требует
-включённого базового OAuth. Клиенты доступны начиная с SDK v0.37.0.
+Включение и проверка application-токенов остаются частью OAuth-конфигурации
+ресурсных сервисов. Они не требуют application grant или application scopes.
 
 ## Проверки
 

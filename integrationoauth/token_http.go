@@ -63,6 +63,7 @@ func (p *Provider) fetch(ctx context.Context, key cacheKey) (Token, time.Time, e
 	if key.kind == "application" {
 		form.Del("projectId")
 		form.Del("installationId")
+		form.Del("scope")
 		form.Set("tokenKind", "application")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, strings.NewReader(form.Encode()))
@@ -93,7 +94,7 @@ func (p *Provider) fetch(ctx context.Context, key cacheKey) (Token, time.Time, e
 	if key.kind == "application" {
 		prefix = "aho_app_"
 	}
-	token, ttl, err := decodeProfileToken(raw, key.scopes, prefix)
+	token, ttl, err := decodeProfileToken(raw, key.scopes, prefix, key.kind == "application")
 	if err != nil {
 		return Token{}, time.Time{}, err
 	}
@@ -115,10 +116,10 @@ func tokenTransportError(ctx context.Context, code string) error {
 }
 
 func decodeToken(raw []byte, requested string) (Token, time.Duration, error) {
-	return decodeProfileToken(raw, requested, "aho_")
+	return decodeProfileToken(raw, requested, "aho_", false)
 }
 
-func decodeProfileToken(raw []byte, requested, prefix string) (Token, time.Duration, error) {
+func decodeProfileToken(raw []byte, requested, prefix string, application bool) (Token, time.Duration, error) {
 	invalid := &TokenError{StatusCode: 200, Code: "invalid_response"}
 	if len(raw) > 16<<10 {
 		return Token{}, 0, invalid
@@ -163,25 +164,38 @@ func decodeProfileToken(raw []byte, requested, prefix string) (Token, time.Durat
 	}
 	var value, kind, scope string
 	var seconds int64
-	for _, name := range []string{"access_token", "token_type", "expires_in", "scope"} {
+	for _, name := range []string{"access_token", "token_type", "expires_in"} {
 		v, exists := fields[name]
 		if !exists || bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+			return Token{}, 0, invalid
+		}
+	}
+	if !application {
+		v, exists := fields["scope"]
+		if !exists || bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+			return Token{}, 0, invalid
+		}
+	} else if v, exists := fields["scope"]; exists {
+		if bytes.Equal(bytes.TrimSpace(v), []byte("null")) || json.Unmarshal(v, &scope) != nil || scope != "" {
 			return Token{}, 0, invalid
 		}
 	}
 	if json.Unmarshal(fields["access_token"], &value) != nil || !validProfileBearer(value, prefix) ||
 		json.Unmarshal(fields["token_type"], &kind) != nil || kind != "Bearer" ||
 		json.Unmarshal(fields["expires_in"], &seconds) != nil || seconds < 1 || seconds > 300 ||
-		json.Unmarshal(fields["scope"], &scope) != nil {
+		(fields["scope"] != nil && json.Unmarshal(fields["scope"], &scope) != nil) {
 		return Token{}, 0, invalid
 	}
-	scopes := strings.Split(scope, " ")
-	// Require the exact granted set, including no extra or missing permissions.
-	canonical, err := normalizeScopes(scopes)
-	if err != nil || canonical != requested {
-		return Token{}, 0, invalid
+	if !application {
+		scopes := strings.Split(scope, " ")
+		// Require the exact granted set, including no extra or missing permissions.
+		canonical, err := normalizeScopes(scopes)
+		if err != nil || canonical != requested {
+			return Token{}, 0, invalid
+		}
+		return Token{value: value, scope: canonical}, time.Duration(seconds) * time.Second, nil
 	}
-	return Token{value: value, scope: canonical}, time.Duration(seconds) * time.Second, nil
+	return Token{value: value}, time.Duration(seconds) * time.Second, nil
 }
 
 func validBearer(value string) bool {

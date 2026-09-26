@@ -33,11 +33,7 @@ func newApplicationOAuth(baseURL, audience string, cfg *ApplicationOAuthConfig) 
 	if cfg == nil {
 		return nil, nil
 	}
-	scope := "catalog.write"
-	if audience == "links" {
-		scope = "links.callbacks.write"
-	}
-	c, err := integrationoauth.NewApplicationClient(integrationoauth.ApplicationClientConfig{Provider: cfg.Provider, BaseURL: baseURL, HTTPClient: cfg.HTTPClient, TokenRequest: integrationoauth.ApplicationRequest{Audience: audience, Scopes: []string{scope}}})
+	c, err := integrationoauth.NewApplicationClient(integrationoauth.ApplicationClientConfig{Provider: cfg.Provider, BaseURL: baseURL, HTTPClient: cfg.HTTPClient, TokenRequest: integrationoauth.ApplicationRequest{Audience: audience}})
 	if err != nil {
 		return nil, err
 	}

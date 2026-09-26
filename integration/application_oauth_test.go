@@ -48,11 +48,11 @@ func TestApplicationOAuthTypedManagement(t *testing.T) {
 					if r.URL.Path == "/oauth/token" {
 						n := issues.Add(1)
 						_ = r.ParseForm()
-						audience, scope := "catalog", "catalog.write"
+						audience := "catalog"
 						if operation == "callbacks" {
-							audience, scope = "links", "links.callbacks.write"
+							audience = "links"
 						}
-						if r.Form.Get("tokenKind") != "application" || r.Form.Has("projectId") || r.Form.Has("installationId") || r.Form.Get("audience") != audience || r.Form.Get("scope") != scope {
+						if r.Form.Get("tokenKind") != "application" || r.Form.Has("projectId") || r.Form.Has("installationId") || r.Form.Has("scope") || r.Form.Get("audience") != audience {
 							t.Error("wrong application binding")
 						}
 						if state == "tokenFailure" {
@@ -67,7 +67,7 @@ func TestApplicationOAuthTypedManagement(t *testing.T) {
 							prefix = "aho_"
 						}
 						w.Header().Set("Content-Type", "application/json")
-						_ = json.NewEncoder(w).Encode(map[string]any{"access_token": prefix + base64.RawURLEncoding.EncodeToString(raw), "token_type": "Bearer", "expires_in": 300, "scope": scope})
+						_ = json.NewEncoder(w).Encode(map[string]any{"access_token": prefix + base64.RawURLEncoding.EncodeToString(raw), "token_type": "Bearer", "expires_in": 300})
 						return
 					}
 					n := calls.Add(1)

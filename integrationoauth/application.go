@@ -4,23 +4,20 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 )
 
-// ApplicationRequest has no project or installation binding. Application
-// permissions must be granted separately by the platform administrator.
+// ApplicationRequest identifies an integration-wide OAuth profile. Access is
+// controlled by the registered client and audience, not by application scopes.
 type ApplicationRequest struct {
 	Audience string
-	Scopes   []string
 }
 
 func applicationRequestKey(req ApplicationRequest) (cacheKey, error) {
-	scopes, err := normalizeScopes(req.Scopes)
-	if err != nil || !(req.Audience == "catalog" && scopes == "catalog.write" || req.Audience == "links" && scopes == "links.callbacks.write") {
+	if req.Audience != "catalog" && req.Audience != "links" {
 		return cacheKey{}, ErrRequest
 	}
-	return cacheKey{audience: req.Audience, scopes: scopes, kind: "application"}, nil
+	return cacheKey{audience: req.Audience, kind: "application"}, nil
 }
 
 func (p *Provider) ApplicationToken(ctx context.Context, req ApplicationRequest) (Token, error) {
@@ -56,7 +53,6 @@ func NewApplicationClient(cfg ApplicationClientConfig) (*Client, error) {
 		return nil, ErrConfig
 	}
 	req := cfg.TokenRequest
-	req.Scopes = slices.Clone(req.Scopes)
 	return &Client{provider: cfg.Provider, base: u, application: &req, http: boundedClient(cfg.HTTPClient)}, nil
 }
 

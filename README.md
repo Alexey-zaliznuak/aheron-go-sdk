@@ -27,7 +27,7 @@ FilesOAuth разделяет OAuth-запросы media API и presigned S3 PUT
 `integration.New` поддерживает `ExecutionOAuth` для Steps/Triggers,
 `CRMOAuth` для CRM-методов, `FilesOAuth` для Files и `LinksOAuth` для проектных
 Links-методов. ApplicationOAuth подключает Catalog.Sync и общий
-Links.RegisterCallback с отдельными правами приложения, без project/installation.
+Links.RegisterCallback по application OAuth без project/installation scopes.
 Подключение хранилищ и lifecycle receiver выполняются в каждой интеграции.
 
 ## Установка

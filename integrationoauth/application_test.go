@@ -42,24 +42,28 @@ func TestApplicationOAuthProviderProfiles(t *testing.T) {
 		}
 		token := bearer(int(n))
 		if r.Form.Get("tokenKind") == "application" {
-			if len(r.Form) != 7 || r.Form.Has("projectId") || r.Form.Has("installationId") {
+			if len(r.Form) != 6 || r.Form.Has("projectId") || r.Form.Has("installationId") || r.Form.Has("scope") {
 				t.Error("application request contains installation identity")
 			}
-			if !(r.Form.Get("audience") == "catalog" && r.Form.Get("scope") == "catalog.write" || r.Form.Get("audience") == "links" && r.Form.Get("scope") == "links.callbacks.write") {
-				t.Error("wrong application permission")
+			if r.Form.Get("audience") != "catalog" && r.Form.Get("audience") != "links" {
+				t.Error("wrong application audience")
 			}
 			token = "aho_app_" + strings.TrimPrefix(token, "aho_")
 		} else if r.Form.Get("projectId") != tokenRequest().ProjectID || r.Form.Get("installationId") != tokenRequest().InstallationID {
 			t.Error("lost installation identity")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": token, "token_type": "Bearer", "expires_in": 300, "scope": r.Form.Get("scope")})
+		response := map[string]any{"access_token": token, "token_type": "Bearer", "expires_in": 300}
+		if r.Form.Get("tokenKind") != "application" {
+			response["scope"] = r.Form.Get("scope")
+		}
+		_ = json.NewEncoder(w).Encode(response)
 	})
 	public = private.Public().(ed25519.PublicKey)
 	endpoint = server.URL + "/oauth/token"
 	ctx := context.Background()
-	catalog := ApplicationRequest{Audience: "catalog", Scopes: []string{"catalog.write"}}
-	links := ApplicationRequest{Audience: "links", Scopes: []string{"links.callbacks.write"}}
+	catalog := ApplicationRequest{Audience: "catalog"}
+	links := ApplicationRequest{Audience: "links"}
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
@@ -111,11 +115,15 @@ func TestApplicationOAuthRejectsProfileConfusion(t *testing.T) {
 				value = "aho_app_" + strings.TrimPrefix(value, "aho_")
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": value, "token_type": "Bearer", "expires_in": 300, "scope": r.Form.Get("scope")})
+			response := map[string]any{"access_token": value, "token_type": "Bearer", "expires_in": 300}
+			if r.Form.Get("tokenKind") != "application" {
+				response["scope"] = r.Form.Get("scope")
+			}
+			_ = json.NewEncoder(w).Encode(response)
 		})
 		var err error
 		if application {
-			_, err = p.ApplicationToken(context.Background(), ApplicationRequest{Audience: "catalog", Scopes: []string{"catalog.write"}})
+			_, err = p.ApplicationToken(context.Background(), ApplicationRequest{Audience: "catalog"})
 		} else {
 			_, err = p.Token(context.Background(), tokenRequest())
 		}
@@ -123,7 +131,7 @@ func TestApplicationOAuthRejectsProfileConfusion(t *testing.T) {
 			t.Fatalf("cross-profile response accepted: %v", err)
 		}
 	}
-	for _, req := range []ApplicationRequest{{}, {"links", []string{"links.write"}}, {"crm", []string{"catalog.write"}}, {"catalog", []string{"catalog.write", "links.callbacks.write"}}} {
+	for _, req := range []ApplicationRequest{{}, {"crm"}, {""}} {
 		var p *Provider
 		if _, err := p.ApplicationToken(context.Background(), req); !errors.Is(err, ErrRequest) {
 			t.Fatal("invalid application grant reached provider")
@@ -134,7 +142,7 @@ func TestApplicationOAuthRejectsProfileConfusion(t *testing.T) {
 func TestApplicationOAuthResourceBoundary(t *testing.T) {
 	var calls atomic.Int32
 	p, server, _ := fixture(t, func(w http.ResponseWriter, r *http.Request) { calls.Add(1) })
-	c, err := NewApplicationClient(ApplicationClientConfig{Provider: p, BaseURL: server.URL + "/api", HTTPClient: server.Client(), TokenRequest: ApplicationRequest{Audience: "catalog", Scopes: []string{"catalog.write"}}})
+	c, err := NewApplicationClient(ApplicationClientConfig{Provider: p, BaseURL: server.URL + "/api", HTTPClient: server.Client(), TokenRequest: ApplicationRequest{Audience: "catalog"}})
 	if err != nil {
 		t.Fatal(err)
 	}
