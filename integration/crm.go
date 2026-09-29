@@ -67,6 +67,20 @@ type SubjectVariableValue struct {
 	CreatedAt            time.Time       `json:"createdAt"`
 }
 
+// SubjectTag is a tag assignment addressed by (project, subject, tag).
+type SubjectTag struct {
+	ProjectID string    `json:"projectId"`
+	SubjectID string    `json:"subjectId"`
+	TagID     string    `json:"tagId"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// UpdateSubjectTagsParams applies an add/remove delta to a subject's tags.
+type UpdateSubjectTagsParams struct {
+	AddTags    []string `json:"addTags"`
+	RemoveTags []string `json:"removeTags"`
+}
+
 // UpsertSubjectParams locates a subject by the AND of all Find criteria: when
 // none match it is created from Create; when exactly one matches (or
 // OnMultiple="first") it is updated from Update. Find must be non-empty.
@@ -183,6 +197,51 @@ func (c *CRMClient) ListSubjectVariables(ctx context.Context, projectID, subject
 	var out []SubjectVariableValue
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
 		return nil, c.decodeError("variable values", err)
+	}
+	return out, nil
+}
+
+// ListSubjectTags returns the tags assigned to a subject.
+func (c *CRMClient) ListSubjectTags(ctx context.Context, projectID, subjectID string) ([]SubjectTag, error) {
+	if projectID == "" || subjectID == "" {
+		return nil, fmt.Errorf("integration: ListSubjectTags requires projectID and subjectID")
+	}
+	req, err := c.bearerRequest(http.MethodGet, "/projects/"+projectID+"/subjects/"+subjectID+"/tags", nil, nil, true)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var out []SubjectTag
+	if err := json.Unmarshal(resp.Body, &out); err != nil {
+		return nil, c.decodeError("subject tags", err)
+	}
+	return out, nil
+}
+
+// UpdateSubjectTags applies an add/remove delta and returns all remaining tag
+// assignments. Adding an assigned tag or removing an absent tag is a no-op.
+func (c *CRMClient) UpdateSubjectTags(ctx context.Context, projectID, subjectID string, p UpdateSubjectTagsParams) ([]SubjectTag, error) {
+	if projectID == "" || subjectID == "" {
+		return nil, fmt.Errorf("integration: UpdateSubjectTags requires projectID and subjectID")
+	}
+	body, err := json.Marshal(p)
+	if err != nil {
+		return nil, fmt.Errorf("integration: marshal subject tags: %w", err)
+	}
+	req, err := c.bearerRequest(http.MethodPatch, "/projects/"+projectID+"/subjects/"+subjectID+"/tags", nil, body, true)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var out []SubjectTag
+	if err := json.Unmarshal(resp.Body, &out); err != nil {
+		return nil, c.decodeError("subject tags", err)
 	}
 	return out, nil
 }

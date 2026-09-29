@@ -101,6 +101,12 @@ func TestCRMOAuthTypedMethods(t *testing.T) {
 			return c.EnsureIntegrationVariableDefinition(ctx, crmOAuthProject, crmOAuthIntegration, CreateVariableDefinitionParams{Name: "Name", Key: "key", Type: "string"})
 		}},
 		{"listTags", "GET", "tags", "crm.read", "[]", 200, func(c *CRMClient) error { return crmCallError(c.ListTags(ctx, crmOAuthProject)) }},
+		{"listSubjectTags", "GET", "subjects/" + crmOAuthSubject + "/tags", "crm.read", "[]", 200, func(c *CRMClient) error {
+			return crmCallError(c.ListSubjectTags(ctx, crmOAuthProject, crmOAuthSubject))
+		}},
+		{"updateSubjectTags", "PATCH", "subjects/" + crmOAuthSubject + "/tags", "crm.write", "[]", 200, func(c *CRMClient) error {
+			return crmCallError(c.UpdateSubjectTags(ctx, crmOAuthProject, crmOAuthSubject, UpdateSubjectTagsParams{AddTags: []string{crmOAuthIntegration}}))
+		}},
 		{"createTag", "POST", "tags", "crm.write", "{}", 201, func(c *CRMClient) error {
 			return crmCallError(c.CreateTag(ctx, crmOAuthProject, CreateTagParams{Name: "Name"}))
 		}},

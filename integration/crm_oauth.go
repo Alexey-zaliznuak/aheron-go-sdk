@@ -88,7 +88,7 @@ func (c *crmOAuth) operation(req httpclient.Request) (*integrationoauth.Client, 
 		}
 	}
 	switch method + " " + shape {
-	case "GET subjects/{id}", "GET subjects/{id}/variable-values", "GET variable-definitions", "GET variable-definitions/{id}", "GET tags":
+	case "GET subjects/{id}", "GET subjects/{id}/variable-values", "GET subjects/{id}/tags", "GET variable-definitions", "GET variable-definitions/{id}", "GET tags":
 		return c.read, []int{200}, nil
 	case "PUT subjects/{id}/variable-values", "PATCH variable-definitions/{id}":
 		return c.variables, []int{200}, nil
@@ -98,7 +98,7 @@ func (c *crmOAuth) operation(req httpclient.Request) (*integrationoauth.Client, 
 		return c.variables, []int{204}, nil
 	case "POST tags":
 		return c.write, []int{201}, nil
-	case "PATCH tags/{id}":
+	case "PATCH tags/{id}", "PATCH subjects/{id}/tags":
 		return c.write, []int{200}, nil
 	case "DELETE tags/{id}":
 		return c.write, []int{204}, nil
