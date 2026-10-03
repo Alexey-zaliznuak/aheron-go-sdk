@@ -98,10 +98,23 @@ HTTP-транспорт; исходный клиент не изменяется
 | `Projects.Get(ctx, projectID)` | `GET /api/projects/{id}` |
 | `Schemes.List(ctx, projectID)` | `GET /api/projects/{id}/schemes` |
 | `Schemes.Get(ctx, projectID, schemeID)` | `GET /api/projects/{id}/schemes/{schemeId}` |
+| `Schemes.GetGraph(ctx, projectID, schemeID)` | `GET /api/projects/{id}/schemes/{schemeId}/graph` |
+| `Schemes.GetStep(ctx, projectID, schemeID, stepID)` | `GET /api/projects/{id}/schemes/{schemeId}/steps/{stepId}` |
 
 ID проверяются до обращения за токеном. Полученная схема должна принадлежать
 запрошенному проекту. Контракт текущих списков не содержит pagination; слишком
 большой ответ возвращает явную ошибку, а не обрезанную выдачу.
+
+`GetGraph` читает согласованный сохранённый граф одной `revision`: `steps`
+(включая `settings`, position и integration reference), `branches` и `edges`
+(включая from/to step, input/output key и branchId). Это draft graph, не снимок
+исполнения. Проверяются принадлежность всех сущностей схеме, уникальность ID и
+ссылки рёбер на шаги/ветки внутри ответа. `GetStep` проверяет ID шага и схему;
+он читает текущее сохранённое состояние, которое может быть новее прежнего графа.
+Настройки сохраняются как JSON без потери вложенных полей; вызывающий адаптер
+отвечает за выбор передаваемых модели данных. Методы используют общий user JWT
+transport, лимит ответа и текущие серверные права проекта без дополнительных
+привилегий и без повторов. Существующие List/Get по-прежнему возвращают метаданные.
 
 `Project.Settings` и `Project.Metadata` — исходные API данные. Адаптер инструмента
 должен явно выбирать нужные модели поля, а не пересылать все настройки проекта.
