@@ -61,6 +61,10 @@ func (c *crmOAuth) operation(req httpclient.Request) (*integrationoauth.Client, 
 	}
 	tail := parts[2:]
 	method := req.Method
+	// Search is a read-only POST, and "search" is not a subject UUID.
+	if len(tail) == 2 && tail[0] == "subjects" && tail[1] == "search" && method == http.MethodPost {
+		return c.read, []int{200}, nil
+	}
 	if len(tail) == 2 && tail[0] == "subjects" && tail[1] == "upsert" && method == http.MethodPost {
 		var body upsertSubjectBody
 		if json.Unmarshal(req.Body, &body) != nil {
@@ -134,8 +138,14 @@ func (c *crmOAuth) do(ctx context.Context, input httpclient.Request) (*httpclien
 	if input.Body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	// No automatic write retry: CRM writes have no durable idempotency receipts.
-	response, err := client.Do(ctx, req)
+	// Reads, including POST search, can refresh a rejected token and replay once.
+	// CRM writes have no durable idempotency receipts and must not be replayed.
+	var response *http.Response
+	if client == c.read {
+		response, err = client.DoIdempotent(ctx, req)
+	} else {
+		response, err = client.Do(ctx, req)
+	}
 	if err != nil {
 		return nil, err
 	}

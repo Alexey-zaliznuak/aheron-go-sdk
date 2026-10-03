@@ -152,6 +152,9 @@ keyed-протоколе `variables` должны быть `nil`/пустыми,
 **Данные** (`client.CRM`, по project API key):
 
 - `UpsertSubject`, `GetSubject`, `ListSubjectVariables`, `SetSubjectVariables`.
+- `SearchSubjects(ctx, projectID, request)` — фильтр по группам тегов и значениям
+  переменных с единой keyset-пагинацией. Это читающий POST: для OAuth нужен
+  `crm.read`; тот же метод доступен с user JWT и project API key.
 - `CreateVariableDefinition`, `EnsureVariableDefinition` — объявление subject-переменных
   проекта. `Ensure` идемпотентен (конфликт `409` = «уже есть»), поэтому его удобно
   звать один раз на install/старт, чтобы гарантировать переменную перед upsert'ом
@@ -167,6 +170,38 @@ keyed-протоколе `variables` должны быть `nil`/пустыми,
 
 Ветвление по ответу CRM: `integration.IsUnauthorized(err)` (401/403) и
 `integration.StatusCode(err)` (точный статус `*APIError`, напр. `409`).
+
+```go
+page, err := client.CRM.SearchSubjects(ctx, projectID, integration.SearchSubjectsRequest{
+	Filter: &integration.SubjectFilter{
+		Tags: &integration.SubjectTagsFilter{Groups: []integration.SubjectTagConditionGroup{
+			{Conditions: []integration.SubjectTagCondition{
+				{TagID: vipTagID, Op: "has"},
+				{TagID: archivedTagID, Op: "notHas"},
+			}},
+		}},
+		Variables: []integration.SubjectVariableCondition{
+			{DefinitionID: tierDefinitionID, Op: "eq", Value: json.RawMessage(`"gold"`)},
+		},
+	},
+	Mode: "matched",
+	Limit: 50,
+})
+if err != nil {
+	return err
+}
+// Для следующей страницы передайте *page.NextCursor в Cursor того же запроса.
+// nil означает конец; после полной страницы следующая может оказаться пустой.
+_ = page
+```
+
+Условия внутри группы тегов объединяются через И, группы — через ИЛИ;
+условия переменных объединяются через И с результатом тегов. `nil` в `Filter`
+означает отсутствие фильтра. `Mode: "all"` возвращает всех с признаком `Matched`.
+`Search` ищет по префиксу имени без учёта регистра. `contains` у переменной
+проверяет элемент массива; поиска подстроки в значении переменной нет.
+`Value` — `json.RawMessage`: `null`, `false` и `0` передаются без потери значения;
+для `exists`/`notExists` значение не требуется.
 
 **Файлы** (`client.Files`, по project API key, платформенный media-service):
 
