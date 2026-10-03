@@ -25,6 +25,10 @@ vars:
   YDB_GENPROTO_PIN: google.golang.org/genproto@v0.0.0-20260819154853-08b0e4226688
 
 tasks:
+  test:mcp:
+    desc: Verify MCP delegation, authoring merge and bound transport
+    cmds:
+      - go test ./integration ./integrationmcp ./platform . {{.CLI_ARGS}}
   default:
     desc: List available tasks
     cmds:

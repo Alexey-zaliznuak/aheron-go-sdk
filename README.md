@@ -767,3 +767,30 @@ historical published revisions remain owned by the platform.
 версии доступа и принятую policy. Секреты и URL в сообщении отсутствуют. Settings
 сохраняются вместе с lifecycle watermark, а `ValidateLifecycleOAuth` сверяет их
 с digest исходного install-события при каждом runtime чтении.
+
+
+### Integration MCP delegation and authoring
+
+`client.Integrations.ListMCP` discovers consented providers for a project;
+`MCPConnection` obtains a five-minute delegation, bound to the user, integration
+and installation. Keep this response private: it is transport configuration,
+never a model/tool result. `integrationmcp.Connect` uses the published HTTPS
+endpoint, rejects redirects, bounds responses, and never retries tool calls.
+`Call(..., readOnly=true)` verifies the discovered read-only annotation before
+sending. A write transport failure must be treated as an uncertain outcome.
+
+Providers declare `Manifest.MCPPath`, verify `integration.MCPClaims` with
+`MCPVerifier`, check current installation identity, and enforce read/write
+permissions. Console and user tokens are not MCP delegations. The platform
+publishes the signing public key through the existing integration JWKS.
+
+`BlockAuthoringRequest` prepares configuration without executing business
+operations. For edits supply the authoritative `baseSettings` and `changes`
+(RFC 7396): objects merge, null removes, arrays replace. Unchanged unknown
+fields survive; providers reject unsupported changes and validate semantics.
+`PreparedIntegrationBlock` preserves the pinned version and reports derived
+ports and removed output keys. The platform still owns graph persistence,
+permissions, connected-edge validation, operation IDs and revision conflicts.
+
+Run `task test:mcp` for these contracts. Backend support is required for the new
+`/projects/{id}/integration-mcp` endpoints.

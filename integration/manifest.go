@@ -134,6 +134,8 @@ type Icon struct {
 //
 // A zero path means "this integration does not offer that endpoint".
 type Manifest struct {
+	// MCPPath is an optional project-scoped MCP endpoint on this integration origin.
+	MCPPath string
 	// ConsolePath is the integration's console page, opened inside a project.
 	ConsolePath string
 	// ConsolePages are the console pages the platform shows in a project's
@@ -176,6 +178,7 @@ type Manifest struct {
 // absolute URLs; an endpoint the manifest does not offer is omitted, which the
 // platform reads as "clear it".
 type manifestBody struct {
+	MCPURL                   string                                   `json:"mcpUrl,omitempty"`
 	ImportCopyFileURL        string                                   `json:"importCopyFileUrl,omitempty"`
 	ResourceValuesURL        string                                   `json:"resourceValuesUrl,omitempty"`
 	PrepareCopyURL           string                                   `json:"prepareCopyUrl,omitempty"`
@@ -261,6 +264,13 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 		return manifestBody{}, fmt.Errorf("integration: manifest ActionRequestTemplate is not valid JSON")
 	}
 
+	mcpURL := ""
+	if m.MCPPath != "" {
+		if !strings.HasPrefix(m.MCPPath, "/") || strings.HasPrefix(m.MCPPath, "//") || strings.ContainsAny(m.MCPPath, "?#\\") || strings.Contains(m.MCPPath, "..") {
+			return manifestBody{}, fmt.Errorf("integration: MCPPath must be an absolute path on the integration origin")
+		}
+		mcpURL = base + m.MCPPath
+	}
 	resourceURL, err := resolveURL(base, m.ResourceValuesPath, "ResourceValuesPath")
 	if err != nil {
 		return manifestBody{}, err
@@ -372,6 +382,7 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 		ActionRequestTemplate:    m.ActionRequestTemplate,
 		TriggerSyncURL:           triggerSyncURL,
 		VariableValuesURL:        variableValuesURL,
+		MCPURL:                   mcpURL,
 		VariableValueSources:     m.VariableValueSources,
 		Blocks:                   blocks,
 		Retired:                  m.Retired,

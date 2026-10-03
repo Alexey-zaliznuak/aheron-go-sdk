@@ -288,3 +288,15 @@ func TestManifestFavoriteByDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestManifestMCPDestination(t *testing.T) {
+	body, err := (Manifest{MCPPath: "/mcp"}).resolve("https://messengers.example")
+	if err != nil || body.MCPURL != "https://messengers.example/mcp" {
+		t.Fatalf("MCP endpoint: %q %v", body.MCPURL, err)
+	}
+	for _, path := range []string{"mcp", "//elsewhere/mcp", "/mcp?key=x", "/../mcp", "/mcp#fragment"} {
+		if _, err := (Manifest{MCPPath: path}).resolve("https://messengers.example"); err == nil {
+			t.Errorf("accepted %q", path)
+		}
+	}
+}

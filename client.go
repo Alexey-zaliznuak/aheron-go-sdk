@@ -27,10 +27,11 @@ type Config struct {
 }
 
 type Client struct {
-	Projects *platform.ProjectsClient
-	Schemes  *platform.SchemesClient
-	Files    *platform.FilesClient
-	CRM      *integration.CRMClient
+	Projects     *platform.ProjectsClient
+	Schemes      *platform.SchemesClient
+	Files        *platform.FilesClient
+	CRM          *integration.CRMClient
+	Integrations *platform.IntegrationsClient
 }
 
 func New(cfg Config) (*Client, error) {
@@ -66,5 +67,5 @@ func New(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{Projects: p.Projects, Schemes: p.Schemes, Files: p.Files, CRM: i.CRM}, nil
+	return &Client{Projects: p.Projects, Schemes: p.Schemes, Files: p.Files, CRM: i.CRM, Integrations: p.Integrations}, nil
 }
