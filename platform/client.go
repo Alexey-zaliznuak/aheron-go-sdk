@@ -2,11 +2,8 @@ package platform
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -69,6 +66,7 @@ type Client struct {
 	maxResponseBytes int64
 	Projects         *ProjectsClient
 	Schemes          *SchemesClient
+	Files            *FilesClient
 }
 
 func New(cfg Config) (*Client, error) {
@@ -137,44 +135,13 @@ func (c *Client) WithTokenProvider(provider TokenProvider) (*Client, error) {
 func (c *Client) bindResources() {
 	c.Projects = &ProjectsClient{client: c}
 	c.Schemes = &SchemesClient{client: c}
+	c.Files = &FilesClient{client: c}
 }
 
 // get intentionally performs one request. Credential refresh is explicit in
 // the provider; there is no hidden replay, auth fallback, or arbitrary URL API.
 func (c *Client) get(ctx context.Context, operation, path string, out any) error {
-	u := *c.base
-	u.Path += path
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return ErrConfig
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := c.Do(ctx, req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return &APIError{Operation: operation, StatusCode: resp.StatusCode}
-	}
-	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
-		return ErrResponse
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, c.maxResponseBytes+1))
-	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return ErrTransport
-	}
-	if int64(len(body)) > c.maxResponseBytes {
-		return ErrResponseTooLarge
-	}
-	if strings.TrimSpace(string(body)) == "null" || json.Unmarshal(body, out) != nil {
-		return ErrResponse
-	}
-	return nil
+	return c.requestJSON(ctx, operation, http.MethodGet, path, nil, nil, out)
 }
 
 // Do is the shared user transport for typed resource clients in this SDK.
