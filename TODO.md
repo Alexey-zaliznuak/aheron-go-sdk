@@ -1,5 +1,25 @@
 # SDK tasks
 
+## Пользовательский API и агент Aheron
+
+- [x] Общий aheron.Client в корне существующего модуля: Projects/Schemes/CRM,
+  явный выбор credential, без дублирования CRM. Старый integration.Client
+  сохраняет API; CRMUser добавляет пользовательский JWT к тем же методам.
+
+- [x] Отдельный пакет platform: access JWT/provider без integration installation,
+  immutable credential binding, HTTPS/loopback, запрет redirects/cookies,
+  ограничения ответов, типизированные ошибки без секретов.
+- [x] Типизированные Projects.List/Get и Schemes.List/Get по действующим API.
+- [x] Тесты HTTP-контрактов, двух пользователей, expired/cancelled auth,
+  malformed/oversized responses и отсутствия скрытых повторов.
+- [ ] Provider пользовательского OAuth и обмена MCP access token после появления
+  соответствующих auth-service endpoints.
+- [ ] Проверенная матрица пользовательского доступа CRM/Media/Links/Execution
+  и следующие типизированные методы, включая безопасные операции записи.
+
+Платформенный план: `../docs/ai-agent-mcp-plan.md`. Контракт пакета:
+[docs/user-api.md](docs/user-api.md). Новый пакет пока не опубликован отдельным релизом.
+
 ## Integration OAuth
 
 - [x] OAuth clients and ordered installation lifecycle remain the supported

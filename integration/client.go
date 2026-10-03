@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/httpclient"
+	"github.com/Alexey-zaliznuak/aheron-go-sdk/platform"
 )
 
 // Default platform base URLs, used when the corresponding Config field is empty.
@@ -52,6 +53,9 @@ const DefaultJWKSURL = "https://aheron.pro/.well-known/aheron-integration-jwks.j
 // CRMOAuth when configured. Files uses FilesOAuth. Other calls retain their signature/API-key
 // requirements. Optional fields have defaults.
 type Config struct {
+	// CRMUser authenticates the existing CRM methods with an ordinary user JWT.
+	// It is mutually exclusive with APIKey and CRMOAuth; there is no fallback.
+	CRMUser *platform.Config
 	// IntegrationID is this integration's platform id (a uuid). It is sent in the
 	// X-Integration-Id header of signed callbacks.
 	IntegrationID string
@@ -127,6 +131,9 @@ type Client struct {
 // configuration; explicit project API keys remain available for user-created
 // credentials.
 func New(cfg Config) (*Client, error) {
+	if cfg.CRMUser != nil && (cfg.APIKey != "" || cfg.CRMOAuth != nil) {
+		return nil, errors.New("integration: ambiguous CRM credentials")
+	}
 	if cfg.ExecutionURL == "" {
 		cfg.ExecutionURL = DefaultExecutionURL
 	}
@@ -188,6 +195,15 @@ func New(cfg Config) (*Client, error) {
 	c.Steps = &StepsClient{oauth: execOAuth}
 	c.Triggers = &TriggersClient{oauth: execOAuth}
 	c.CRM = &CRMClient{http: crmHTTP, apiKey: cfg.APIKey, oauth: crmOAuth}
+	if cfg.CRMUser != nil {
+		userConfig := *cfg.CRMUser
+		userConfig.BaseURL = cfg.CRMURL
+		userClient, err := platform.New(userConfig)
+		if err != nil {
+			return nil, err
+		}
+		c.CRM.user = &crmUser{client: userClient, baseURL: cfg.CRMURL}
+	}
 	c.Files = &FilesClient{http: mediaHTTP, apiKey: cfg.APIKey, oauth: filesOAuth}
 	c.Links = &LinksClient{applicationOAuth: callbacksOAuth, oauth: linksOAuth, http: httpclient.New(transportCfg(cfg.LinksURL)), baseURL: cfg.LinksURL, id: cfg.IntegrationID, apiKey: cfg.APIKey}
 	c.Catalog = &CatalogClient{

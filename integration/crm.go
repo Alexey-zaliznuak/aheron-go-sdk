@@ -16,6 +16,7 @@ import (
 // relative to the configured CRMURL, which already carries the "/api/crm" gateway
 // prefix.
 type CRMClient struct {
+	user   *crmUser
 	oauth  *crmOAuth
 	http   *httpclient.Client
 	apiKey string
@@ -24,8 +25,8 @@ type CRMClient struct {
 // WithAPIKey returns a copy of the client that authenticates with apiKey instead
 // of the key configured on the parent Client. It shares the underlying HTTP
 // transport, so it is cheap to derive per request or per project.
-// If CRMOAuth is configured, its installation binding takes precedence and this
-// method does not disable it. Construct a separate client for another project.
+// If CRMOAuth or CRMUser is configured, its identity takes precedence and this
+// method does not disable it. Construct a separate client for another identity.
 //
 // Use it when a single integration process acts on behalf of many projects, each
 // with its own project API key (for example one delivered per project on
@@ -707,7 +708,7 @@ func (c *CRMClient) DeleteTag(ctx context.Context, projectID, tagID string) erro
 }
 
 func (c *CRMClient) bearerRequest(method, path string, query map[string]string, body []byte, idempotent bool) (httpclient.Request, error) {
-	if c.oauth != nil {
+	if c.oauth != nil || c.user != nil {
 		return httpclient.Request{Method: method, Path: path, Query: query, Body: body}, nil
 	}
 	if c.apiKey == "" {
@@ -724,6 +725,9 @@ func (c *CRMClient) bearerRequest(method, path string, query map[string]string, 
 }
 
 func (c *CRMClient) do(ctx context.Context, req httpclient.Request) (*httpclient.Response, error) {
+	if c.user != nil {
+		return c.user.do(ctx, req)
+	}
 	if c.oauth != nil {
 		return c.oauth.do(ctx, req)
 	}
@@ -731,7 +735,7 @@ func (c *CRMClient) do(ctx context.Context, req httpclient.Request) (*httpclient
 }
 
 func (c *CRMClient) decodeError(operation string, err error) error {
-	if c.oauth != nil {
+	if c.oauth != nil || c.user != nil {
 		return errCRMOAuthResponse
 	}
 	return fmt.Errorf("integration: decode %s: %w", operation, err)

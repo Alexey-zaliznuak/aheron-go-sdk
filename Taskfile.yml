@@ -74,6 +74,27 @@ tasks:
     cmds:
       - go test ./integration -run '^TestLifecycle' -count=1 {{.CLI_ARGS}}
 
+  test:platform:
+    desc: 'Verify user API credentials, isolation and resource contracts (optional -- -race)'
+    env:
+      GOWORK: 'off'
+    cmds:
+      - go test ./platform -count=1 {{.CLI_ARGS}}
+
+  test:api:
+    desc: 'Verify the common API facade and shared user CRM (optional -- -race)'
+    env:
+      GOWORK: 'off'
+    cmds:
+      - go test . ./platform -count=1 {{.CLI_ARGS}}
+
+  vet:platform:
+    desc: Vet the user API client
+    env:
+      GOWORK: 'off'
+    cmds:
+      - go vet ./platform
+
   test:oauth:
     desc: 'Verify OAuth assertions, cache isolation, concurrency and HTTP retry boundaries (optional -- -race)'
     cmds:
