@@ -15,21 +15,23 @@ import (
 const DefaultBaseURL = "https://aheron.pro/api"
 
 var (
-	ErrConfig           = errors.New("platform: invalid client configuration")
-	ErrInvalidInput     = errors.New("platform: invalid resource identifier")
-	ErrUnauthorized     = errors.New("platform: unauthorized")
-	ErrForbidden        = errors.New("platform: forbidden")
-	ErrNotFound         = errors.New("platform: not found")
-	ErrConflict         = errors.New("platform: conflict")
-	ErrTransport        = errors.New("platform: API transport failed")
-	ErrResponse         = errors.New("platform: invalid API response")
-	ErrResponseTooLarge = errors.New("platform: API response exceeds the size limit")
+	ErrConfig                   = errors.New("platform: invalid client configuration")
+	ErrInvalidInput             = errors.New("platform: invalid resource identifier")
+	ErrUnauthorized             = errors.New("platform: unauthorized")
+	ErrForbidden                = errors.New("platform: forbidden")
+	ErrNotFound                 = errors.New("platform: not found")
+	ErrContractRevisionMismatch = errors.New("platform: runtime contract revision mismatch")
+	ErrConflict                 = errors.New("platform: conflict")
+	ErrTransport                = errors.New("platform: API transport failed")
+	ErrResponse                 = errors.New("platform: invalid API response")
+	ErrResponseTooLarge         = errors.New("platform: API response exceeds the size limit")
 )
 
 // APIError exposes status, but never an upstream body or credential-bearing URL.
 type APIError struct {
 	Operation  string
 	StatusCode int
+	Code       string // Allowlisted machine-readable code; never raw upstream text.
 }
 
 func (e *APIError) Error() string {
@@ -37,7 +39,8 @@ func (e *APIError) Error() string {
 }
 
 func (e *APIError) Is(target error) bool {
-	return (target == ErrUnauthorized && e.StatusCode == 401) ||
+	return (target == ErrContractRevisionMismatch && e.StatusCode == 409 && e.Code == "contract_revision_mismatch") ||
+		(target == ErrUnauthorized && e.StatusCode == 401) ||
 		(target == ErrForbidden && e.StatusCode == 403) ||
 		(target == ErrNotFound && e.StatusCode == 404) ||
 		(target == ErrConflict && e.StatusCode == 409)
