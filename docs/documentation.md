@@ -56,3 +56,31 @@ Catalog pages expose summaries, exact references and a channel snapshot. A
 cursor from a replaced channel yields a conflict: restart catalog enumeration.
 Reading a previously published package remains possible until it is revoked;
 an uploaded but unactivated package is not public. There is no implicit `latest`.
+# Публикация из CI
+
+`Client.Publish(ctx, package, operationID)` выполняет загрузку и одну CAS-активацию.
+Сначала восстанавливает квитанцию предыдущего запуска; после активации проверяет,
+что канал всё ещё указывает на этот выпуск. Сетевой сбой активации разрешается
+одним чтением квитанции. Конфликт не повторяется с новой `expectedRevision`.
+При неизвестном исходе повторяют тот же пакет и operationID. Отозванный канал
+требует явного восстановления оператором, а не подстановки ревизии 0.
+
+CLI входит в этот же модуль, отдельный SDK устанавливать не нужно:
+
+```sh
+go run github.com/Alexey-zaliznuak/aheron-go-sdk/cmd/knowledge-publish \
+  --base-url "$DOCUMENTATION_API_URL" \
+  --package documentation-package.json \
+  --operation-id "pipeline-$CI_PIPELINE_ID"
+```
+
+Запускать из модуля сервиса, зафиксировав версию SDK в go.mod. CI передаёт
+`DOCUMENTATION_ID_TOKEN` через environment, а не аргументы. CLI требует HTTPS,
+ограничивает размер входа 2 MiB, время всей операции одной минутой
+(`--timeout`) и печатает только JSON-квитанцию. Не использовать job ID в operationID:
+он меняется при повторном запуске job. Для нескольких выпусков одного provider
+в одном pipeline добавлять стабильный суффикс контракта.
+
+Проверка актуальности канала — точечная проверка, не блокировка последующего
+deploy. CI должен отдельно сериализовать production deploy и отклонять устаревшие
+deployment jobs. Экспортёры и тесты примеров принадлежат репозиториям исполнителей.
