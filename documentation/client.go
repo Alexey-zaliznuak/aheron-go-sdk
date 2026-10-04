@@ -99,11 +99,16 @@ func (c *Client) request(ctx context.Context, method, path string, in, out any, 
 		return err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes+1))
+	responseLimit := MaxResponseBytes
+	if path == "/public/knowledge/library/read" {
+		// A manual article contains up to 2 MiB of Markdown; JSON may escape each byte.
+		responseLimit = 6*(2<<20) + (64 << 10)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, int64(responseLimit)+1))
 	if err != nil {
 		return err
 	}
-	if len(raw) > MaxResponseBytes {
+	if len(raw) > responseLimit {
 		return errors.New("documentation: response too large")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

@@ -83,6 +83,7 @@ type ReadRequest struct {
 }
 
 type ReadResult struct {
+	Fallback         bool            `json:"fallback"`
 	Document         DocumentSummary `json:"document"`
 	ContractRevision string          `json:"contractRevision"`
 	SourceRevision   string          `json:"sourceRevision"`
