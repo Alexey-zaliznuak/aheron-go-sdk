@@ -51,3 +51,34 @@ requested appendix. The complete-document hash and rendered-text hash differ.
 
 Use `task test:documentation`. Publishing remains available through the existing
 publisher methods and `knowledge-publish` CLI.
+
+## User-authorized article editing
+
+The same SDK exposes `aheron.Client.Documentation` (or
+`platform.NewDocumentation`) for the existing editorial API. Set
+`aheron.Config.DocumentationURL` to the complete API prefix; the default is
+`https://docs.aheron.pro/api/documentation`. Bind `UserTokenProvider` to the
+current user. Project keys and integration OAuth do not grant editorial access.
+The server checks platform-administrator or integration-owner permissions on
+every call. No roles, owner identities or arbitrary URLs are accepted by methods.
+
+Methods: `ListFolders`, `CreateFolder`, `ListProvisionableIntegrations`,
+`ProvisionIntegrationFolder`, `ListArticles`, `GetArticle`, `CreateArticle`,
+`UpdateArticle`, `PublishArticle`, `UnpublishArticle`. Folders expose `canManage`.
+Integration provisioning is idempotent and obtains its owner/slug from backend.
+DTOs are shared in this package; user transport stays in `platform`, separate
+from the public reader and CI publisher credentials.
+
+`CreateArticle` saves a draft. Read the current revision before updating;
+`UpdateArticleParams` supplies complete title/slug/body/summary with
+`expectedRevision`. A nil summary clears it. Omitted/nil knowledge preserves
+the previous metadata and appendices; an empty knowledge object clears them.
+Publication is a separate call at the reviewed revision. Both human and agent
+appendices become public when published. Technical packages cannot be changed
+through the editorial client.
+
+Calls do not retry writes or follow redirects. A timeout/5xx after a write
+requires reading current state before another attempt. A 409 requires rereading
+and reconciling the edit. The shared transport bounds request JSON to 2 MiB;
+the editorial client bounds response JSON to 16 MiB by default. Values are never
+silently truncated. Public library requests still send no user token.

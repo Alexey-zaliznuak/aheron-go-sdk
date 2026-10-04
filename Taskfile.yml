@@ -37,7 +37,7 @@ tasks:
     env:
       GOWORK: 'off'
     cmds:
-      - go test ./documentation ./cmd/knowledge-publish {{.CLI_ARGS}}
+      - go test ./documentation ./cmd/knowledge-publish ./platform . {{.CLI_ARGS}}
 
   test:mcp:
     desc: Verify MCP delegation, authoring merge and bound transport

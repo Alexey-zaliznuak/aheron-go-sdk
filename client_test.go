@@ -102,3 +102,35 @@ func TestUserCRMNoReplayOrCredentialFallback(t *testing.T) {
 		t.Fatal("ambiguous integration credentials accepted")
 	}
 }
+
+func TestDocumentationFacadeUsesOnlyUserCredentials(t *testing.T) {
+	var calls atomic.Int32
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path != "/documentation/folders" || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			t.Error("wrong documentation route or credential")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer api.Close()
+	for _, user := range []bool{true, false} {
+		cfg := Config{DocumentationURL: api.URL + "/documentation", AllowLoopbackHTTP: true}
+		if user {
+			cfg.UserTokenProvider = testProvider(t, "editor")
+		} else {
+			cfg.ProjectAPIKey = "ahr_proj_test"
+		}
+		c, err := New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = c.Documentation.ListFolders(context.Background())
+		if (err == nil) != user {
+			t.Fatalf("user=%v: %v", user, err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatal("project credential reached documentation")
+	}
+}

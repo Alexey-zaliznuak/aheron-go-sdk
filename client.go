@@ -21,17 +21,19 @@ type Config struct {
 	CRMOAuth          *integration.CRMOAuthConfig
 	BaseURL           string
 	CRMURL            string
+	DocumentationURL  string
 	HTTPClient        *http.Client
 	Timeout           time.Duration
 	AllowLoopbackHTTP bool
 }
 
 type Client struct {
-	Projects     *platform.ProjectsClient
-	Schemes      *platform.SchemesClient
-	Files        *platform.FilesClient
-	CRM          *integration.CRMClient
-	Integrations *platform.IntegrationsClient
+	Projects      *platform.ProjectsClient
+	Schemes       *platform.SchemesClient
+	Files         *platform.FilesClient
+	CRM           *integration.CRMClient
+	Integrations  *platform.IntegrationsClient
+	Documentation *platform.DocumentationClient
 }
 
 func New(cfg Config) (*Client, error) {
@@ -67,5 +69,11 @@ func New(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{Projects: p.Projects, Schemes: p.Schemes, Files: p.Files, CRM: i.CRM, Integrations: p.Integrations}, nil
+	docConfig := pc
+	docConfig.BaseURL = cfg.DocumentationURL
+	documentation, err := platform.NewDocumentation(docConfig)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{Projects: p.Projects, Schemes: p.Schemes, Files: p.Files, CRM: i.CRM, Integrations: p.Integrations, Documentation: documentation}, nil
 }
