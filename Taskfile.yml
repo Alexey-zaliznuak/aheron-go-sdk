@@ -25,6 +25,13 @@ vars:
   YDB_GENPROTO_PIN: google.golang.org/genproto@v0.0.0-20260819154853-08b0e4226688
 
 tasks:
+  test:variables:
+    desc: Verify the shared template dialect and executable reference examples
+    env:
+      GOWORK: 'off'
+    cmds:
+      - go test ./variables {{.CLI_ARGS}}
+
   test:documentation:
     desc: Verify knowledge package contracts and HTTP clients
     env:
