@@ -3,6 +3,7 @@
 package integrationmcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -156,6 +157,18 @@ func (c *Client) Call(ctx context.Context, name string, args json.RawMessage, re
 			result.Text = append(result.Text, t.Text)
 		} else {
 			return Result{}, ErrContract
+		}
+	}
+	// The upstream MCP client decodes structuredContent through float64. When
+	// its recommended JSON text mirror matches, retain those original bytes so
+	// opaque settings and large integer IDs are not rounded on a read/edit cycle.
+	if len(result.Text) == 1 && len(result.Data) > 0 {
+		var mirror map[string]any
+		if json.Unmarshal([]byte(result.Text[0]), &mirror) == nil && mirror != nil {
+			normalized, err := json.Marshal(mirror)
+			if err == nil && bytes.Equal(normalized, result.Data) {
+				result.Data = json.RawMessage(result.Text[0])
+			}
 		}
 	}
 	encoded, _ := json.Marshal(result)

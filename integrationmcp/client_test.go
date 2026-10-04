@@ -7,6 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,6 +29,10 @@ func TestScopedDiscoveryAndCall(t *testing.T) {
 		writes.Add(1)
 		return nil, output{a.Value}, nil
 	})
+	server.AddTool(&mcp.Tool{Name: "opaque", InputSchema: map[string]any{"type": "object"}, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		raw := req.Params.Arguments
+		return &mcp.CallToolResult{StructuredContent: raw, Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}}}, nil
+	})
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
 	httpServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer delegated" {
@@ -44,7 +49,7 @@ func TestScopedDiscoveryAndCall(t *testing.T) {
 	}
 	defer client.Close()
 	tools, err := client.ListTools(t.Context())
-	if err != nil || len(tools) != 2 {
+	if err != nil || len(tools) != 3 {
 		t.Fatalf("discovery %v %v", tools, err)
 	}
 	result, err := client.Call(t.Context(), "read", json.RawMessage(`{"value":"hello"}`), true)
@@ -65,6 +70,10 @@ func TestScopedDiscoveryAndCall(t *testing.T) {
 	}
 	if writes.Load() != 1 {
 		t.Fatal("mutation not executed exactly once")
+	}
+	result, err = client.Call(t.Context(), "opaque", json.RawMessage(`{"value":9007199254740993}`), true)
+	if err != nil || !strings.Contains(string(result.Data), "9007199254740993") {
+		t.Fatalf("opaque JSON rounded: %s %v", result.Data, err)
 	}
 }
 func TestEndpointBindingRejectsRedirect(t *testing.T) {
