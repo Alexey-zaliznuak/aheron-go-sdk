@@ -9,8 +9,9 @@ import (
 
 // LibraryProfile describes observed runtime contracts, not the caller's rights.
 type LibraryProfile struct {
-	Locale    string     `json:"locale"`
-	Contracts []Contract `json:"contracts"`
+	Locale         string     `json:"locale"`
+	Contracts      []Contract `json:"contracts"`
+	IntegrationIDs []string   `json:"integrationIds,omitempty"`
 }
 
 // LibraryRef is a tagged union. Only the fields for Source may be populated.
@@ -32,6 +33,37 @@ type LibraryDocument struct {
 	ContentSHA256  string     `json:"contentSha256"` // canonical complete document, not rendered text
 	Requires       []Contract `json:"requires"`      // includes a package's own runtime contract
 	SourceRevision string     `json:"sourceRevision,omitempty"`
+	IntegrationID  string     `json:"integrationId,omitempty"`
+	Kind           string     `json:"kind,omitempty"`
+	BlockKey       string     `json:"blockKey,omitempty"`
+}
+
+type LibraryIntegrationManifestRequest struct {
+	Profile LibraryProfile `json:"profile"`
+}
+type LibraryIntegrationManifestResult struct {
+	SnapshotSHA256 string                       `json:"snapshotSha256"`
+	Integrations   []LibraryIntegrationManifest `json:"integrations"`
+}
+type LibraryIntegrationManifest struct {
+	IntegrationID           string              `json:"integrationId"`
+	Overview                *LibraryRef         `json:"overview,omitempty"`
+	OverviewStatus          string              `json:"overviewStatus"`
+	Documents               []LibraryDocument   `json:"documents"`
+	Blocks                  []LibraryBlockGuide `json:"blocks"`
+	MissingTechnicalPackage bool                `json:"missingTechnicalPackage"`
+}
+type LibraryBlockGuide struct {
+	BlockKey    string       `json:"blockKey"`
+	GuideRef    *LibraryRef  `json:"guideRef,omitempty"`
+	Status      string       `json:"status"`
+	RelatedRefs []LibraryRef `json:"relatedRefs"`
+}
+
+func (c *Client) LibraryIntegrationManifests(ctx context.Context, in LibraryIntegrationManifestRequest) (LibraryIntegrationManifestResult, error) {
+	var out LibraryIntegrationManifestResult
+	err := c.request(ctx, "POST", "/public/knowledge/library/integrations/manifest", in, &out, false)
+	return out, err
 }
 
 type LibraryCatalogRequest struct {

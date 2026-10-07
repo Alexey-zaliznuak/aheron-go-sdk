@@ -27,6 +27,8 @@ type Document struct {
 	AgentAppendixMarkdown string     `json:"agentAppendixMarkdown"`
 	RelatedTopics         []string   `json:"relatedTopics"`
 	Requires              []Contract `json:"requires"`
+	Kind                  string     `json:"kind,omitempty"`
+	BlockKey              string     `json:"blockKey,omitempty"`
 }
 
 type Package struct {
@@ -52,6 +54,8 @@ type DocumentSummary struct {
 	ContentSHA256 string      `json:"contentSha256"`
 	RelatedTopics []string    `json:"relatedTopics"`
 	Requires      []Contract  `json:"requires"`
+	Kind          string      `json:"kind,omitempty"`
+	BlockKey      string      `json:"blockKey,omitempty"`
 }
 
 type Channel struct {
@@ -68,6 +72,13 @@ type CatalogRequest struct {
 	Locale           string `json:"locale"`
 	Cursor           string `json:"cursor,omitempty"`
 	Limit            int    `json:"limit,omitempty"`
+}
+
+type CurrentCatalogRequest struct {
+	ProviderKey string `json:"providerKey"`
+	Locale      string `json:"locale"`
+	Cursor      string `json:"cursor,omitempty"`
+	Limit       int    `json:"limit,omitempty"`
 }
 
 type Catalog struct {
@@ -99,13 +110,15 @@ type UploadResult struct {
 }
 
 type ActivateRequest struct {
-	PackageDigest    string `json:"packageDigest"`
-	ContractRevision string `json:"contractRevision"`
-	ExpectedRevision int64  `json:"expectedRevision"`
-	OperationID      string `json:"operationId"`
+	PackageDigest           string `json:"packageDigest"`
+	ContractRevision        string `json:"contractRevision"`
+	ExpectedRevision        int64  `json:"expectedRevision"`
+	OperationID             string `json:"operationId"`
+	ExpectedCurrentRevision *int64 `json:"expectedCurrentRevision,omitempty"`
 }
 
 type Receipt struct {
-	OperationID string  `json:"operationId"`
-	Channel     Channel `json:"channel"`
+	OperationID    string   `json:"operationId"`
+	Channel        Channel  `json:"channel"`
+	CurrentChannel *Channel `json:"currentChannel,omitempty"`
 }

@@ -40,12 +40,15 @@ func TestCanonicalV1Vector(t *testing.T) {
 
 func TestCanonicalRejectsAmbiguousOrOversizedPackages(t *testing.T) {
 	for name, mutate := range map[string]func(*Package){
-		"duplicate":    func(p *Package) { p.Documents = append(p.Documents, p.Documents[0]) },
-		"unversioned":  func(p *Package) { p.FormatVersion = 2 },
-		"invalid utf8": func(p *Package) { p.Documents[0].CommonMarkdown = string([]byte{0xff}) },
-		"too many":     func(p *Package) { p.Documents = make([]Document, 65) },
-		"too large":    func(p *Package) { p.Documents[0].CommonMarkdown = strings.Repeat("x", MaxPackageBytes) },
-		"traversal":    func(p *Package) { p.Documents[0].DocumentKey = "../secret" },
+		"duplicate":          func(p *Package) { p.Documents = append(p.Documents, p.Documents[0]) },
+		"unversioned":        func(p *Package) { p.FormatVersion = 2 },
+		"invalid utf8":       func(p *Package) { p.Documents[0].CommonMarkdown = string([]byte{0xff}) },
+		"too many":           func(p *Package) { p.Documents = make([]Document, 65) },
+		"too large":          func(p *Package) { p.Documents[0].CommonMarkdown = strings.Repeat("x", MaxPackageBytes) },
+		"traversal":          func(p *Package) { p.Documents[0].DocumentKey = "../secret" },
+		"missing block key":  func(p *Package) { p.Documents[0].Kind = "blockGuide" },
+		"overview block key": func(p *Package) { p.Documents[0].Kind = "overview"; p.Documents[0].BlockKey = "send" },
+		"unknown kind":       func(p *Package) { p.Documents[0].Kind = "automatic" },
 		"duplicate dependency": func(p *Package) {
 			p.Documents[0].Requires = []Contract{{"platform/code", "harness/1"}, {"platform/code", "harness/2"}}
 		},

@@ -13,16 +13,39 @@ import (
 )
 
 var (
-	keyPattern    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*(/[a-zA-Z0-9][a-zA-Z0-9._-]*)*$`)
-	localePattern = regexp.MustCompile(`^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$`)
-	shaPattern    = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
-	digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	keyPattern           = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*(/[a-zA-Z0-9][a-zA-Z0-9._-]*)*$`)
+	localePattern        = regexp.MustCompile(`^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$`)
+	shaPattern           = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+	digestPattern        = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	integrationIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
 
 func ValidKey(s string) bool            { return len(s) <= 160 && keyPattern.MatchString(s) }
 func ValidLocale(s string) bool         { return len(s) <= 32 && localePattern.MatchString(s) }
 func ValidDigest(s string) bool         { return digestPattern.MatchString(s) }
 func ValidSourceRevision(s string) bool { return shaPattern.MatchString(s) }
+
+func IntegrationProviderID(provider string) (string, bool) {
+	id, ok := strings.CutPrefix(provider, "integration/")
+	return id, ok && integrationIDPattern.MatchString(id) && id != "00000000-0000-0000-0000-000000000000"
+}
+
+// ValidDocumentRelation validates explicit catalog metadata. An empty kind is
+// retained for existing documents; only a block guide requires a block key.
+func ValidDocumentRelation(kind, blockKey string) bool {
+	switch kind {
+	case "":
+		return blockKey == ""
+	case "overview":
+		return blockKey == ""
+	case "blockGuide":
+		return ValidKey(blockKey)
+	case "reference":
+		return blockKey == "" || ValidKey(blockKey)
+	default:
+		return false
+	}
+}
 
 // CanonicalPackage returns a deep copy. V1 uses encoding/json's compact encoding
 // of these ordered structs (including HTML escaping), UTF-8, LF line endings,
@@ -39,6 +62,9 @@ func CanonicalPackage(in Package) (Package, []byte, error) {
 	out.Documents = slices.Clone(in.Documents)
 	for i := range out.Documents {
 		d := &out.Documents[i]
+		if !ValidDocumentRelation(d.Kind, d.BlockKey) {
+			return Package{}, nil, errors.New("documentation: invalid document kind or blockKey")
+		}
 		if !ValidKey(d.DocumentKey) || !ValidKey(d.TopicKey) || !ValidLocale(d.Locale) {
 			return Package{}, nil, fmt.Errorf("documentation: invalid document identity at index %d", i)
 		}

@@ -52,6 +52,36 @@ requested appendix. The complete-document hash and rendered-text hash differ.
 Use `task test:documentation`. Publishing remains available through the existing
 publisher methods and `knowledge-publish` CLI.
 
+## Staging documentation with a runtime deployment
+
+CI can separate immutable upload from publication. Run both against the same
+exported artifact (do not regenerate it between jobs):
+
+```sh
+knowledge-publish --phase upload --base-url "$DOCUMENTATION_API_URL" --package documentation-package.json
+# Deploy the exact sourceRevision image and verify its readiness here.
+knowledge-publish --phase activate --base-url "$DOCUMENTATION_API_URL" --package documentation-package.json --operation-id "pipeline-$CI_PIPELINE_ID"
+```
+
+Both phases use `DOCUMENTATION_ID_TOKEN`; never store it with the artifact.
+Upload validates and stores the package but does not expose it publicly. The
+activate phase calls `ActivatePackage`, never uploads, uses the observed channel
+revision once, and verifies both the recovered receipt and the active channel.
+Retry an interrupted activation with the same operation ID; a concurrent or
+superseding release is a conflict, not an automatic overwrite. CI must serialize
+deployment and activation and prevent older jobs from deploying over a newer one.
+
+`--phase publish` (the default) retains the existing combined `Client.Publish`
+behavior for callers that explicitly want upload and immediate activation. These
+helpers operate on the package's exact contract channel. Integration publishers
+use `--current` on activation/publication, or the typed `PublishCurrent` and
+`ActivateCurrentPackage` methods. They accept only `integration/<UUID>`, read
+independent revisions for both channels, atomically promote them, and verify both
+current and exact channel receipts. Upload with `--current` still only stages the
+package. Existing `Publish`/`ActivatePackage` never implicitly promote current.
+The lower-level `Activate` API also exposes `expectedCurrentRevision` for callers
+managing their own publication flow.
+
 ## User-authorized article editing
 
 The same SDK exposes `aheron.Client.Documentation` (or

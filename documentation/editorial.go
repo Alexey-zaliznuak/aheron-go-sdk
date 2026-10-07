@@ -23,6 +23,8 @@ type Folder struct {
 }
 
 type ArticleKnowledge struct {
+	Kind                  string     `json:"kind,omitempty"`
+	BlockKey              string     `json:"blockKey,omitempty"`
 	TopicKey              string     `json:"topicKey,omitempty"`
 	Locale                string     `json:"locale,omitempty"`
 	HumanAppendixMarkdown string     `json:"humanAppendixMarkdown,omitempty"`

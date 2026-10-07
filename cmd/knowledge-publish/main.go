@@ -33,12 +33,17 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	base := fs.String("base-url", "", "documentation API prefix (HTTPS)")
 	path := fs.String("package", "", "canonical package JSON file")
 	op := fs.String("operation-id", "", "stable operation ID, e.g. pipeline-123 (reuse on retry)")
+	phase := fs.String("phase", "publish", "upload before deployment; activate after readiness; publish combines both")
+	current := fs.Bool("current", false, "also promote the current channel (integration providers only)")
 	timeout := fs.Duration("timeout", time.Minute, "total publication deadline")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() != 0 || *path == "" || *op == "" || *timeout <= 0 {
-		return errors.New("package, operation-id and positive timeout required; no positional arguments")
+	if *phase != "upload" && *phase != "activate" && *phase != "publish" {
+		return errors.New("phase must be upload, activate or publish")
+	}
+	if fs.NArg() != 0 || *path == "" || (*phase != "upload" && *op == "") || *timeout <= 0 {
+		return errors.New("package and positive timeout required; activation requires operation-id; no positional arguments")
 	}
 	token := os.Getenv("DOCUMENTATION_ID_TOKEN")
 	if token == "" {
@@ -59,11 +64,33 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, *timeout)
 	defer cancel()
-	receipt, err := client.Publish(ctx, p, *op)
+	receipt, err := publishPhase(ctx, client, *phase, p, *op, *current)
 	if err != nil {
 		return err
 	}
 	return json.NewEncoder(out).Encode(receipt)
+}
+
+func publishPhase(ctx context.Context, client *docs.Client, phase string, p docs.Package, operationID string, current bool) (any, error) {
+	if _, ok := docs.IntegrationProviderID(p.ProviderKey); current && !ok {
+		return nil, errors.New("current publication requires an integration provider")
+	}
+	switch phase {
+	case "upload":
+		return client.Upload(ctx, p)
+	case "activate":
+		if current {
+			return client.ActivateCurrentPackage(ctx, p, operationID)
+		}
+		return client.ActivatePackage(ctx, p, operationID)
+	case "publish":
+		if current {
+			return client.PublishCurrent(ctx, p, operationID)
+		}
+		return client.Publish(ctx, p, operationID)
+	default:
+		return nil, errors.New("unknown publication phase")
+	}
 }
 
 func readPackage(r io.Reader) (docs.Package, error) {

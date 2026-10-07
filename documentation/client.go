@@ -156,6 +156,12 @@ func (c *Client) Activate(ctx context.Context, req ActivateRequest) (Receipt, er
 	err := c.request(ctx, "POST", "/publishing/activate", req, &out, true)
 	return out, err
 }
+
+func (c *Client) CurrentCatalog(ctx context.Context, req CurrentCatalogRequest) (Catalog, error) {
+	var out Catalog
+	err := c.request(ctx, "POST", "/public/knowledge/current/catalog", req, &out, false)
+	return out, err
+}
 func (c *Client) Receipt(ctx context.Context, operationID string) (Receipt, error) {
 	if !ValidKey(operationID) || strings.Contains(operationID, "/") {
 		return Receipt{}, errors.New("documentation: invalid operation ID")
