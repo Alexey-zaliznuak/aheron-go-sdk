@@ -41,6 +41,9 @@ func (c *Client) publishPackage(ctx context.Context, p Package, operationID stri
 	if err != nil {
 		return Receipt{}, err
 	}
+	if err := c.checkPublicationPackage(p); err != nil {
+		return Receipt{}, err
+	}
 	if !ValidKey(operationID) || strings.Contains(operationID, "/") {
 		return Receipt{}, errors.New("documentation: invalid operation ID")
 	}

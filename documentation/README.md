@@ -58,12 +58,29 @@ CI can separate immutable upload from publication. Run both against the same
 exported artifact (do not regenerate it between jobs):
 
 ```sh
-knowledge-publish --phase upload --base-url "$DOCUMENTATION_API_URL" --package documentation-package.json
+knowledge-publish --phase upload --base-url "$DOCUMENTATION_API_URL" --package documentation-package.json --release-sequence "$CI_PIPELINE_ID"
 # Deploy the exact sourceRevision image and verify its readiness here.
-knowledge-publish --phase activate --base-url "$DOCUMENTATION_API_URL" --package documentation-package.json --operation-id "pipeline-$CI_PIPELINE_ID"
+knowledge-publish --phase activate --base-url "$DOCUMENTATION_API_URL" --package documentation-package.json --operation-id "pipeline-$CI_PIPELINE_ID" --release-sequence "$CI_PIPELINE_ID"
 ```
 
-Both phases use `DOCUMENTATION_ID_TOKEN`; never store it with the artifact.
+Both phases use `DOCUMENTATION_API_KEY`, a personal docs key with the owner's
+current permissions. Store it as a masked/protected CI secret; never put it in an
+artifact or a command argument. `--release-sequence` must increase for each new
+release of one provider and stay unchanged across retries. GitLab pipelines can
+use `CI_PIPELINE_ID`; other callers supply their own monotonic release number.
+The package supplies provider and source SHA. These are publisher assertions,
+not an attestation by the CI vendor. Docs authenticates the key and authorizes
+its owner independently on every request.
+
+Go callers set `Config.Publication = &PublicationContext{ProviderKey: ...,
+SourceRevision: ..., ReleaseSequence: ...}` and supply the key through
+`PublisherToken`. The SDK binds uploads and high-level activation to this
+context and sends its headers only to publishing endpoints. Public reads never
+receive the key or release metadata. A configured context is copied on creation.
+
+Existing OIDC callers may still use `DOCUMENTATION_ID_TOKEN` instead, without
+`--release-sequence`; verified token claims provide their metadata. Setting both
+credential variables is an error. The default Go config remains compatible.
 Upload validates and stores the package but does not expose it publicly. The
 activate phase calls `ActivatePackage`, never uploads, uses the observed channel
 revision once, and verifies both the recovered receipt and the active channel.

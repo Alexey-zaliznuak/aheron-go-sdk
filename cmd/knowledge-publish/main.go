@@ -1,5 +1,5 @@
-// knowledge-publish is a CI adapter for the documentation SDK. It never reads
-// service configuration or user credentials, and prints only the final receipt.
+// knowledge-publish is a CI adapter for the documentation SDK. It reads only
+// its explicit publishing credential and prints the final receipt, never secrets.
 package main
 
 import (
@@ -35,6 +35,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	op := fs.String("operation-id", "", "stable operation ID, e.g. pipeline-123 (reuse on retry)")
 	phase := fs.String("phase", "publish", "upload before deployment; activate after readiness; publish combines both")
 	current := fs.Bool("current", false, "also promote the current channel (integration providers only)")
+	sequence := fs.Int64("release-sequence", 0, "increasing provider release number, unchanged on retry; required with DOCUMENTATION_API_KEY")
 	timeout := fs.Duration("timeout", time.Minute, "total publication deadline")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -45,11 +46,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if fs.NArg() != 0 || *path == "" || (*phase != "upload" && *op == "") || *timeout <= 0 {
 		return errors.New("package and positive timeout required; activation requires operation-id; no positional arguments")
 	}
-	token := os.Getenv("DOCUMENTATION_ID_TOKEN")
-	if token == "" {
-		return errors.New("DOCUMENTATION_ID_TOKEN is required")
-	}
-	client, err := docs.New(docs.Config{BaseURL: *base, PublisherToken: func(context.Context) (string, error) { return token, nil }})
+	token, apiKey, err := publicationCredential(os.Getenv("DOCUMENTATION_API_KEY"), os.Getenv("DOCUMENTATION_ID_TOKEN"), *sequence)
 	if err != nil {
 		return err
 	}
@@ -62,6 +59,14 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	cfg := docs.Config{BaseURL: *base, PublisherToken: func(context.Context) (string, error) { return token, nil }}
+	if apiKey {
+		cfg.Publication = &docs.PublicationContext{ProviderKey: p.ProviderKey, SourceRevision: p.SourceRevision, ReleaseSequence: *sequence}
+	}
+	client, err := docs.New(cfg)
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(ctx, *timeout)
 	defer cancel()
 	receipt, err := publishPhase(ctx, client, *phase, p, *op, *current)
@@ -69,6 +74,25 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	return json.NewEncoder(out).Encode(receipt)
+}
+
+func publicationCredential(apiKey, oidc string, sequence int64) (string, bool, error) {
+	if apiKey != "" && oidc != "" {
+		return "", false, errors.New("set only one of DOCUMENTATION_API_KEY and DOCUMENTATION_ID_TOKEN")
+	}
+	if apiKey != "" {
+		if sequence < 1 {
+			return "", false, errors.New("positive release-sequence is required with DOCUMENTATION_API_KEY")
+		}
+		return apiKey, true, nil
+	}
+	if oidc == "" {
+		return "", false, errors.New("DOCUMENTATION_API_KEY or DOCUMENTATION_ID_TOKEN is required")
+	}
+	if sequence != 0 {
+		return "", false, errors.New("release-sequence must be omitted with DOCUMENTATION_ID_TOKEN")
+	}
+	return oidc, false, nil
 }
 
 func publishPhase(ctx context.Context, client *docs.Client, phase string, p docs.Package, operationID string, current bool) (any, error) {

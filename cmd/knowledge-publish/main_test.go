@@ -45,6 +45,35 @@ func TestInvalidPhaseRejectedBeforeCredentialsOrFiles(t *testing.T) {
 	}
 }
 
+func TestPublicationCredentialSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name, key, oidc string
+		sequence        int64
+		wantKey, valid  bool
+	}{
+		{"key", "personal-key", "", 42, true, true},
+		{"oidc", "", "short-lived-token", 0, false, true},
+		{"both", "personal-key", "short-lived-token", 42, false, false},
+		{"missing", "", "", 0, false, false},
+		{"missing sequence", "personal-key", "", 0, false, false},
+		{"negative sequence", "personal-key", "", -1, false, false},
+		{"oidc metadata override", "", "short-lived-token", 42, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			token, key, err := publicationCredential(tc.key, tc.oidc, tc.sequence)
+			if (err == nil) != tc.valid {
+				t.Fatalf("unexpected validation result: %v", err)
+			}
+			if tc.valid && (key != tc.wantKey || token == "") {
+				t.Fatal("wrong credential selected")
+			}
+			if err != nil && (strings.Contains(err.Error(), "personal-key") || strings.Contains(err.Error(), "short-lived-token")) {
+				t.Fatal("error includes credential")
+			}
+		})
+	}
+}
+
 func TestReadPackageRejectsAmbiguousOrOversizeInput(t *testing.T) {
 	for _, raw := range []string{`{}`, `{"unknown":1}`, `{} {}`, `null`, strings.Repeat(" ", docs.MaxPackageBytes+1)} {
 		if _, err := readPackage(strings.NewReader(raw)); err == nil {

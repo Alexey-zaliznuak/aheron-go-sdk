@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,13 +21,26 @@ type Config struct {
 	Timeout           time.Duration
 	AllowLoopbackHTTP bool
 	PublisherToken    func(context.Context) (string, error)
+	// Publication supplies release metadata for personal API-key publishing.
+	// OIDC callers omit it; their metadata comes from the verified token.
+	Publication *PublicationContext
+}
+
+// PublicationContext identifies a release, not its authority. The server
+// authenticates the key and checks the owner's current rights separately.
+// ReleaseSequence must increase within a provider, and stay unchanged on retry.
+type PublicationContext struct {
+	ProviderKey     string
+	SourceRevision  string
+	ReleaseSequence int64
 }
 
 type Client struct {
-	baseURL string
-	http    *http.Client
-	timeout time.Duration
-	token   func(context.Context) (string, error)
+	baseURL     string
+	http        *http.Client
+	timeout     time.Duration
+	token       func(context.Context) (string, error)
+	publication *PublicationContext
 }
 
 func New(cfg Config) (*Client, error) {
@@ -50,7 +64,15 @@ func New(cfg Config) (*Client, error) {
 	}
 	// Never forward publisher credentials through a redirect, including same-host ones.
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Client{baseURL: strings.TrimRight(cfg.BaseURL, "/"), http: &hc, timeout: cfg.Timeout, token: cfg.PublisherToken}, nil
+	var publication *PublicationContext
+	if cfg.Publication != nil {
+		p := *cfg.Publication
+		if !ValidKey(p.ProviderKey) || !ValidSourceRevision(p.SourceRevision) || p.ReleaseSequence < 1 {
+			return nil, errors.New("documentation: valid publication provider, source revision and positive release sequence required")
+		}
+		publication = &p
+	}
+	return &Client{baseURL: strings.TrimRight(cfg.BaseURL, "/"), http: &hc, timeout: cfg.Timeout, token: cfg.PublisherToken, publication: publication}, nil
 }
 
 type APIError struct {
@@ -93,6 +115,11 @@ func (c *Client) request(ctx context.Context, method, path string, in, out any, 
 			return errors.New("documentation: empty publisher token")
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
+		if p := c.publication; p != nil {
+			req.Header.Set("X-Documentation-Provider", p.ProviderKey)
+			req.Header.Set("X-Documentation-Source-Revision", p.SourceRevision)
+			req.Header.Set("X-Documentation-Release-Sequence", strconv.FormatInt(p.ReleaseSequence, 10))
+		}
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -144,12 +171,22 @@ func (c *Client) Upload(ctx context.Context, p Package) (UploadResult, error) {
 	if err != nil {
 		return UploadResult{}, err
 	}
+	if err := c.checkPublicationPackage(canonical); err != nil {
+		return UploadResult{}, err
+	}
 	var out UploadResult
 	err = c.request(ctx, "POST", "/publishing/packages", canonical, &out, true)
 	if err == nil && (out.ProviderKey != canonical.ProviderKey || out.ContractRevision != canonical.ContractRevision || out.PackageDigest != SHA256(raw)) {
 		err = errors.New("documentation: upload receipt mismatch")
 	}
 	return out, err
+}
+
+func (c *Client) checkPublicationPackage(p Package) error {
+	if c.publication != nil && (c.publication.ProviderKey != p.ProviderKey || c.publication.SourceRevision != p.SourceRevision) {
+		return errors.New("documentation: package differs from publication context")
+	}
+	return nil
 }
 func (c *Client) Activate(ctx context.Context, req ActivateRequest) (Receipt, error) {
 	var out Receipt
