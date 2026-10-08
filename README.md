@@ -771,7 +771,10 @@ historical published revisions remain owned by the platform.
 
 ### Integration MCP delegation and authoring
 
-`client.Integrations.ListMCP` discovers consented providers for a project;
+`client.Integrations.ListInstallations` lists the actual project installations,
+including their status, independently of MCP availability. An empty `ListMCP`
+result does not mean the project has no integrations. `ListMCP` discovers only
+consented MCP providers for a project;
 `MCPConnection` obtains a five-minute delegation, bound to the user, integration
 and installation. Keep this response private: it is transport configuration,
 never a model/tool result. `integrationmcp.Connect` uses the published HTTPS

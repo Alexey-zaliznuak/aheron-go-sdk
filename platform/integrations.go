@@ -9,6 +9,37 @@ import (
 
 type IntegrationsClient struct{ client *Client }
 
+// IntegrationInstallation is project state, independent of MCP availability
+// or the permissions accepted for invoking the integration's MCP endpoint.
+type IntegrationInstallation struct {
+	InstallationID string    `json:"installationId,omitempty"`
+	AccessVersion  int64     `json:"accessVersion"`
+	ProjectID      string    `json:"projectId"`
+	IntegrationID  string    `json:"integrationId"`
+	Status         string    `json:"status"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+func (s *IntegrationsClient) ListInstallations(ctx context.Context, projectID string) ([]IntegrationInstallation, error) {
+	if !resourceID.MatchString(projectID) {
+		return nil, ErrInvalidInput
+	}
+	var result []IntegrationInstallation
+	if err := s.client.requestJSON(ctx, "list integration installations", http.MethodGet, "/projects/"+projectID+"/integrations", nil, nil, &result); err != nil {
+		return nil, err
+	}
+	for _, item := range result {
+		if item.ProjectID != projectID || !resourceID.MatchString(item.IntegrationID) || item.Status == "" {
+			return nil, ErrResponse
+		}
+	}
+	if result == nil {
+		result = []IntegrationInstallation{}
+	}
+	return result, nil
+}
+
 // IntegrationMCP describes an installed provider without credentials. The URL
 // comes from its published manifest and must never be supplied by the model.
 type IntegrationMCP struct {
