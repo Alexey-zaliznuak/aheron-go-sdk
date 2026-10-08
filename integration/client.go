@@ -100,10 +100,12 @@ type Config struct {
 	PublicBaseURL string
 
 	// Transport tuning. Zero values fall back to the httpclient defaults.
-	Timeout      time.Duration
-	RetryCount   int
-	RetryWaitMin time.Duration
-	RetryWaitMax time.Duration
+	// DisableTimeout removes the client timeout; context and credential expiry still apply.
+	DisableTimeout bool
+	Timeout        time.Duration
+	RetryCount     int
+	RetryWaitMin   time.Duration
+	RetryWaitMax   time.Duration
 
 	// Logger receives SDK logs. Defaults to a no-op (silent).
 	Logger Logger
@@ -155,12 +157,13 @@ func New(cfg Config) (*Client, error) {
 
 	transportCfg := func(baseURL string) httpclient.Config {
 		return httpclient.Config{
-			BaseURL:      baseURL,
-			Timeout:      cfg.Timeout,
-			RetryCount:   cfg.RetryCount,
-			RetryWaitMin: cfg.RetryWaitMin,
-			RetryWaitMax: cfg.RetryWaitMax,
-			Logger:       cfg.Logger,
+			BaseURL:        baseURL,
+			Timeout:        cfg.Timeout,
+			DisableTimeout: cfg.DisableTimeout,
+			RetryCount:     cfg.RetryCount,
+			RetryWaitMin:   cfg.RetryWaitMin,
+			RetryWaitMax:   cfg.RetryWaitMax,
+			Logger:         cfg.Logger,
 		}
 	}
 

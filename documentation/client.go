@@ -16,8 +16,10 @@ import (
 )
 
 type Config struct {
-	BaseURL           string // API prefix, e.g. https://docs.aheron.pro/api/documentation
-	HTTPClient        *http.Client
+	BaseURL    string // API prefix, e.g. https://docs.aheron.pro/api/documentation
+	HTTPClient *http.Client
+	// DisableTimeout removes the client timeout; context and credential expiry still apply.
+	DisableTimeout    bool
 	Timeout           time.Duration
 	AllowLoopbackHTTP bool
 	PublisherToken    func(context.Context) (string, error)
@@ -55,12 +57,20 @@ func New(cfg Config) (*Client, error) {
 	if u.Scheme != "https" && !(cfg.AllowLoopbackHTTP && loopback && u.Scheme == "http") {
 		return nil, errors.New("documentation: HTTPS required")
 	}
-	if cfg.Timeout <= 0 {
+	if cfg.Timeout < 0 {
+		return nil, errors.New("documentation: invalid timeout")
+	}
+	if cfg.DisableTimeout {
+		cfg.Timeout = 0
+	} else if cfg.Timeout == 0 {
 		cfg.Timeout = 10 * time.Second
 	}
 	hc := http.Client{}
 	if cfg.HTTPClient != nil {
 		hc = *cfg.HTTPClient
+	}
+	if cfg.DisableTimeout {
+		hc.Timeout = 0
 	}
 	// Never forward publisher credentials through a redirect, including same-host ones.
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -85,8 +95,11 @@ func (e *APIError) Error() string {
 }
 
 func (c *Client) request(ctx context.Context, method, path string, in, out any, publish bool) error {
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
 	var body []byte
 	var err error
 	if in != nil {

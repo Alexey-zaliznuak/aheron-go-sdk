@@ -48,12 +48,15 @@ func (e *APIError) Is(target error) bool {
 
 type Config struct {
 	// BaseURL includes the backend API prefix, e.g. https://aheron.pro/api.
-	BaseURL          string
-	TokenProvider    TokenProvider
+	BaseURL       string
+	TokenProvider TokenProvider
+	// DisableTimeout removes the client timeout; context and credential expiry still apply.
+	DisableTimeout   bool
 	Timeout          time.Duration
 	MaxResponseBytes int64
-	// HTTPClient is copied. Redirects, cookies and an unbounded timeout are
-	// disabled on the copy; the caller's original client is never changed.
+	// HTTPClient is copied. Redirects and cookies are disabled on the copy;
+	// the caller's original client is never changed. Timeout defaults to 30s
+	// unless DisableTimeout is explicitly set.
 	HTTPClient *http.Client
 	// AllowLoopbackHTTP permits development against localhost or a loopback
 	// IP only. It does not enable plaintext remote credential transmission.
@@ -94,7 +97,9 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Timeout < 0 || cfg.MaxResponseBytes < 0 {
 		return nil, ErrConfig
 	}
-	if cfg.Timeout == 0 {
+	if cfg.DisableTimeout {
+		cfg.Timeout = 0
+	} else if cfg.Timeout == 0 {
 		cfg.Timeout = 30 * time.Second
 	}
 	if cfg.MaxResponseBytes == 0 {

@@ -89,3 +89,21 @@ func TestEndpointBindingRejectsRedirect(t *testing.T) {
 		t.Fatal("delegation followed redirect")
 	}
 }
+
+func TestExplicitTimeoutOptOutPreservesDelegationExpiry(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "provider", Version: "1"}, nil)
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	s := httptest.NewTLSServer(handler)
+	defer s.Close()
+	connection := platform.MCPConnection{Provider: platform.IntegrationMCP{MCPURL: s.URL}, Token: "delegated", ExpiresAt: time.Now().Add(time.Minute)}
+	options := ConnectOptions{Timeout: time.Nanosecond, DisableTimeout: true}
+	c, err := ConnectWithOptions(t.Context(), connection, s.Client().Transport, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	connection.ExpiresAt = time.Now().Add(-time.Second)
+	if _, err := ConnectWithOptions(t.Context(), connection, s.Client().Transport, options); err != ErrContract {
+		t.Fatalf("expired delegation accepted: %v", err)
+	}
+}

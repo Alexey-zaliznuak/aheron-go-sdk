@@ -75,12 +75,14 @@ func (e *APIError) Error() string {
 // Config configures the transport. Zero fields fall back to the Default*
 // constants; a nil Logger falls back to a no-op.
 type Config struct {
-	BaseURL      string
-	Timeout      time.Duration
-	RetryCount   int
-	RetryWaitMin time.Duration
-	RetryWaitMax time.Duration
-	Logger       logx.Logger
+	BaseURL string
+	// DisableTimeout removes the client timeout; context and credential expiry still apply.
+	DisableTimeout bool
+	Timeout        time.Duration
+	RetryCount     int
+	RetryWaitMin   time.Duration
+	RetryWaitMax   time.Duration
+	Logger         logx.Logger
 }
 
 // Client is a transport bound to a single base URL.
@@ -98,7 +100,9 @@ func New(cfg Config) *Client {
 		log = logx.Nop()
 	}
 	timeout := cfg.Timeout
-	if timeout <= 0 {
+	if cfg.DisableTimeout {
+		timeout = 0
+	} else if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
 	retryCount := cfg.RetryCount

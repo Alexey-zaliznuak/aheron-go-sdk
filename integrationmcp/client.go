@@ -41,7 +41,27 @@ type Result struct {
 	IsError bool            `json:"isError,omitempty"`
 }
 
+// ConnectOptions tunes only the request timeout. Delegation expiry and the
+// fixed endpoint/credential boundary always remain enforced.
+type ConnectOptions struct {
+	Timeout        time.Duration
+	DisableTimeout bool
+}
+
 func Connect(ctx context.Context, connection platform.MCPConnection, transport http.RoundTripper) (*Client, error) {
+	return ConnectWithOptions(ctx, connection, transport, ConnectOptions{})
+}
+
+func ConnectWithOptions(ctx context.Context, connection platform.MCPConnection, transport http.RoundTripper, options ConnectOptions) (*Client, error) {
+	if options.Timeout < 0 {
+		return nil, ErrContract
+	}
+	timeout := options.Timeout
+	if options.DisableTimeout {
+		timeout = 0
+	} else if timeout == 0 {
+		timeout = 30 * time.Second
+	}
 	endpoint, err := url.Parse(connection.Provider.MCPURL)
 	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" || connection.Token == "" || !connection.ExpiresAt.After(time.Now()) {
 		return nil, ErrContract
@@ -52,7 +72,7 @@ func Connect(ctx context.Context, connection platform.MCPConnection, transport h
 		transport = t
 	}
 	ctx, cancel := context.WithDeadline(ctx, connection.ExpiresAt)
-	hc := &http.Client{Timeout: 30 * time.Second, Transport: &boundTransport{transport, endpoint.String(), connection.Token, connection.ExpiresAt}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	hc := &http.Client{Timeout: timeout, Transport: &boundTransport{transport, endpoint.String(), connection.Token, connection.ExpiresAt}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	client := mcp.NewClient(&mcp.Implementation{Name: "aheron-integration-gateway", Version: "1"}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: endpoint.String(), HTTPClient: hc, MaxRetries: -1, DisableStandaloneSSE: true}, nil)
 	if err != nil {

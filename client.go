@@ -23,6 +23,8 @@ type Config struct {
 	CRMURL            string
 	DocumentationURL  string
 	HTTPClient        *http.Client
+	// DisableTimeout removes the client timeout; context and credential expiry still apply.
+	DisableTimeout    bool
 	Timeout           time.Duration
 	AllowLoopbackHTTP bool
 }
@@ -56,12 +58,12 @@ func New(cfg Config) (*Client, error) {
 			return platform.AccessToken{}, platform.ErrCredential
 		})
 	}
-	pc := platform.Config{BaseURL: cfg.BaseURL, TokenProvider: provider, HTTPClient: cfg.HTTPClient, Timeout: cfg.Timeout, AllowLoopbackHTTP: cfg.AllowLoopbackHTTP}
+	pc := platform.Config{BaseURL: cfg.BaseURL, TokenProvider: provider, HTTPClient: cfg.HTTPClient, Timeout: cfg.Timeout, DisableTimeout: cfg.DisableTimeout, AllowLoopbackHTTP: cfg.AllowLoopbackHTTP}
 	p, err := platform.New(pc)
 	if err != nil {
 		return nil, err
 	}
-	ic := integration.Config{APIKey: cfg.ProjectAPIKey, CRMOAuth: cfg.CRMOAuth, CRMURL: cfg.CRMURL, Timeout: cfg.Timeout}
+	ic := integration.Config{APIKey: cfg.ProjectAPIKey, CRMOAuth: cfg.CRMOAuth, CRMURL: cfg.CRMURL, Timeout: cfg.Timeout, DisableTimeout: cfg.DisableTimeout}
 	if cfg.UserTokenProvider != nil {
 		ic.CRMUser = &pc
 	}
