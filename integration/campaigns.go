@@ -52,9 +52,9 @@ type CreateCampaignParams struct {
 	CommandID      string          `json:"commandId"`
 	Name           string          `json:"name"`
 	ActivationKey  string          `json:"activationKey"`
-	Filter         json.RawMessage `json:"filter"`
-	RequiredFilter json.RawMessage `json:"requiredFilter"`
-	Metadata       json.RawMessage `json:"metadata"`
+	Filter         json.RawMessage `json:"filter,omitempty"`
+	RequiredFilter json.RawMessage `json:"requiredFilter,omitempty"`
+	Metadata       json.RawMessage `json:"metadata,omitempty"`
 }
 
 type UpdateCampaignParams struct {

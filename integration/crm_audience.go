@@ -9,10 +9,11 @@ import (
 )
 
 type VariableValuesLookupParams struct {
-	Query  string   `json:"query,omitempty"`
-	Cursor string   `json:"cursor,omitempty"`
-	Limit  int      `json:"limit,omitempty"`
-	Values []string `json:"values,omitempty"`
+	Query  string `json:"query,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+	// A non-nil empty slice selects an empty resolve, not search mode.
+	Values []string `json:"values"`
 }
 
 func (c *CRMClient) ListVariableValueSources(ctx context.Context, projectID, integrationID string) (map[string]VariableValueSource, error) {

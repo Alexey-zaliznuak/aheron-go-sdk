@@ -66,6 +66,18 @@ func TestCampaignOAuthScopesAndIsolation(t *testing.T) {
 			if r.Method == http.MethodGet {
 				_, _ = w.Write([]byte(`{"sources":{"channel_access":{"type":"remote"}}}`))
 			} else {
+				var input struct {
+					Limit  int      `json:"limit"`
+					Values []string `json:"values"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+					t.Error(err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				if input.Limit == 0 && input.Values == nil {
+					t.Error("empty resolve was changed into search")
+				}
 				_, _ = w.Write([]byte(`{"items":[]}`))
 			}
 		case r.Method == http.MethodGet:
@@ -82,6 +94,11 @@ func TestCampaignOAuthScopesAndIsolation(t *testing.T) {
 			if input["commandId"] != crmOAuthSubject {
 				t.Error("lost idempotency command")
 			}
+			for _, field := range []string{"filter", "requiredFilter", "metadata"} {
+				if value, present := input[field]; present && value == nil {
+					t.Errorf("optional %s must be omitted, not null", field)
+				}
+			}
 			w.WriteHeader(201)
 			_, _ = w.Write([]byte(`{"id":"` + crmOAuthSubject + `","projectId":"` + crmOAuthProject + `"}`))
 		}
@@ -93,6 +110,9 @@ func TestCampaignOAuthScopesAndIsolation(t *testing.T) {
 	if _, err := c.Campaigns.Create(ctx, crmOAuthProject, CreateCampaignParams{CommandID: crmOAuthSubject, Name: "test", Filter: json.RawMessage(`{}`), RequiredFilter: json.RawMessage(`{}`), Metadata: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := c.Campaigns.Create(ctx, crmOAuthProject, CreateCampaignParams{CommandID: crmOAuthSubject, Name: "minimal", ActivationKey: "send"}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := c.Campaigns.ListNamedTriggers(ctx, crmOAuthProject); err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +120,9 @@ func TestCampaignOAuthScopesAndIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := c.CRM.LookupVariableValues(ctx, crmOAuthProject, crmOAuthIntegration, "channel_access", VariableValuesLookupParams{Limit: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CRM.LookupVariableValues(ctx, crmOAuthProject, crmOAuthIntegration, "channel_access", VariableValuesLookupParams{Values: []string{}}); err != nil {
 		t.Fatal(err)
 	}
 	before := calls
