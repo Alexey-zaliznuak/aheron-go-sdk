@@ -41,6 +41,7 @@ const (
 	DefaultMediaURL     = "https://aheron.pro/api/media"
 	DefaultCatalogURL   = "https://aheron.pro/api"
 	DefaultLinksURL     = "https://link.aheron.pro/api"
+	DefaultCampaignURL  = "https://aheron.pro/api/campaigns"
 )
 
 // DefaultJWKSURL is the platform's well-known integration JWKS endpoint on
@@ -68,6 +69,11 @@ type Config struct {
 	ExecutionOAuth *ExecutionOAuthConfig
 	// CRMOAuth authenticates every CRM method for one project installation.
 	CRMOAuth *CRMOAuthConfig
+	// CampaignOAuth authenticates campaign read/write and trigger catalog access.
+	CampaignOAuth *CampaignOAuthConfig
+	CampaignURL   string
+	// BackendURL carries the platform /api prefix for the named trigger catalog.
+	BackendURL string
 	// FilesOAuth authenticates all Files methods for one project installation.
 	FilesOAuth *FilesOAuthConfig
 	// LinksOAuth authenticates project links, excluding application callback registration.
@@ -119,7 +125,8 @@ type Client struct {
 	// Triggers activates and lists integration triggers.
 	Triggers *TriggersClient
 	// CRM reads and writes data using CRMOAuth or an explicit project API key.
-	CRM *CRMClient
+	CRM       *CRMClient
+	Campaigns *CampaignClient
 	// Files stores and retrieves project media files with FilesOAuth or a project API key.
 	Files *FilesClient
 	// Catalog publishes this integration's own block and endpoint declarations.
@@ -141,6 +148,12 @@ func New(cfg Config) (*Client, error) {
 	}
 	if cfg.CRMURL == "" {
 		cfg.CRMURL = DefaultCRMURL
+	}
+	if cfg.CampaignURL == "" {
+		cfg.CampaignURL = DefaultCampaignURL
+	}
+	if cfg.BackendURL == "" {
+		cfg.BackendURL = DefaultCatalogURL
 	}
 	if cfg.MediaURL == "" {
 		cfg.MediaURL = DefaultMediaURL
@@ -195,6 +208,10 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	c := &Client{integrationID: cfg.IntegrationID}
+	c.Campaigns, err = newCampaignClient(cfg.CampaignURL, cfg.BackendURL, cfg.CampaignOAuth)
+	if err != nil {
+		return nil, err
+	}
 	c.Steps = &StepsClient{oauth: execOAuth}
 	c.Triggers = &TriggersClient{oauth: execOAuth}
 	c.CRM = &CRMClient{http: crmHTTP, apiKey: cfg.APIKey, oauth: crmOAuth}

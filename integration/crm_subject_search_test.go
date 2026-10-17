@@ -142,11 +142,18 @@ func TestSearchSubjectsOAuthInventoryAndProjectBoundary(t *testing.T) {
 	}
 	for _, req := range []httpclient.Request{
 		{Method: http.MethodGet, Path: "/projects/" + crmOAuthProject + "/subjects/search"},
-		{Method: http.MethodPost, Path: "/projects/" + crmOAuthProject + "/subjects/search/count"},
+		{Method: http.MethodGet, Path: "/projects/" + crmOAuthProject + "/subjects/search/count"},
+		{Method: http.MethodDelete, Path: "/projects/" + crmOAuthProject + "/subjects/batch"},
 		{Method: http.MethodPost, Path: "/projects/" + crmOAuthProject + "/subjects/search/"},
 	} {
 		if _, _, err := c.oauth.operation(req); !errors.Is(err, integrationoauth.ErrRequest) {
 			t.Fatalf("unclassified operation accepted: %+v err=%v", req, err)
+		}
+	}
+	for _, path := range []string{"subjects/search/count", "subjects/batch"} {
+		client, statuses, err := c.oauth.operation(httpclient.Request{Method: http.MethodPost, Path: "/projects/" + crmOAuthProject + "/" + path})
+		if err != nil || client != c.oauth.read || len(statuses) != 1 || statuses[0] != 200 {
+			t.Fatalf("read endpoint %s: statuses=%v err=%v", path, statuses, err)
 		}
 	}
 }

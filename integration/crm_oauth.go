@@ -18,6 +18,7 @@ import (
 // CRMOAuthConfig binds all CRM methods to one installation. Reuse Provider
 // across installations; its token cache stays scoped to project/install/scopes.
 type CRMOAuthConfig struct {
+	BackendURL     string
 	Provider       *integrationoauth.Provider
 	ProjectID      string
 	InstallationID string
@@ -27,6 +28,8 @@ type CRMOAuthConfig struct {
 type crmOAuth struct {
 	projectID, baseURL                     string
 	read, write, variables, writeVariables *integrationoauth.Client
+	valueSources                           *integrationoauth.Client
+	backendURL                             string
 }
 
 func newCRMOAuth(baseURL string, cfg *CRMOAuthConfig) (*crmOAuth, error) {
@@ -34,6 +37,15 @@ func newCRMOAuth(baseURL string, cfg *CRMOAuthConfig) (*crmOAuth, error) {
 		return nil, nil
 	}
 	c := &crmOAuth{projectID: cfg.ProjectID, baseURL: strings.TrimRight(baseURL, "/")}
+	c.backendURL = strings.TrimRight(cfg.BackendURL, "/")
+	if c.backendURL == "" {
+		c.backendURL = DefaultCatalogURL
+	}
+	var err error
+	c.valueSources, err = integrationoauth.NewClient(integrationoauth.ClientConfig{Provider: cfg.Provider, BaseURL: c.backendURL, HTTPClient: cfg.HTTPClient, TokenRequest: integrationoauth.Request{ProjectID: cfg.ProjectID, InstallationID: cfg.InstallationID, Audience: "backend", Scopes: []string{"crm.read"}}})
+	if err != nil {
+		return nil, err
+	}
 	for _, operation := range []struct {
 		target **integrationoauth.Client
 		scopes []string
@@ -61,7 +73,13 @@ func (c *crmOAuth) operation(req httpclient.Request) (*integrationoauth.Client, 
 	}
 	tail := parts[2:]
 	method := req.Method
+	if len(tail) == 3 && tail[0] == "subjects" && tail[1] == "search" && tail[2] == "count" && method == http.MethodPost {
+		return c.read, []int{200}, nil
+	}
 	// Search is a read-only POST, and "search" is not a subject UUID.
+	if len(tail) == 2 && tail[0] == "subjects" && tail[1] == "batch" && method == http.MethodPost {
+		return c.read, []int{200}, nil
+	}
 	if len(tail) == 2 && tail[0] == "subjects" && tail[1] == "search" && method == http.MethodPost {
 		return c.read, []int{200}, nil
 	}

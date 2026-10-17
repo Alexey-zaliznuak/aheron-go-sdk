@@ -804,3 +804,7 @@ Run `task test:mcp` for these contracts. Backend support is required for the new
 `/projects/{id}/integration-mcp` endpoints.
 
 Clients support an explicit `DisableTimeout: true` transport option. It removes only the SDK request timeout; parent context cancellation, token expiry, permission checks and response contracts remain enforced. Existing `Timeout: 0` keeps its previous default. Integration MCP callers can use `ConnectWithOptions` with the same opt-out; `Connect` keeps its 30-second default.
+
+Campaign integrations use `client.Campaigns`, CRM audience helpers and the
+`campaign`/`executionevent` event contracts. See [campaign integration contracts](docs/campaigns.md)
+for scopes, revisions, attribution and replay boundaries; run `task test:campaigns`.

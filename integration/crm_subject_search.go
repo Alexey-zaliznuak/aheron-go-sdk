@@ -41,6 +41,7 @@ type SubjectVariableCondition struct {
 // AND. Inclusion is applied with OR after these conditions, then exclusion
 // wins: matched = !excluded && (conditionsMatch || included).
 type SubjectFilter struct {
+	ManualOnly        bool                       `json:"manualOnly,omitempty"`
 	Tags              *SubjectTagsFilter         `json:"tags,omitempty"`
 	Variables         []SubjectVariableCondition `json:"variables,omitempty"`
 	IncludeSubjectIDs []string                   `json:"includeSubjectIds,omitempty"`
@@ -53,11 +54,46 @@ type SubjectFilter struct {
 // prefix. Cursor is an opaque token from the previous response. Limit defaults
 // to 50 and is capped by CRM at 200.
 type SearchSubjectsRequest struct {
-	Filter *SubjectFilter `json:"filter"`
-	Mode   string         `json:"mode,omitempty"`
-	Search string         `json:"search,omitempty"`
-	Cursor string         `json:"cursor,omitempty"`
-	Limit  int            `json:"limit,omitempty"`
+	RequiredFilter *SubjectFilter `json:"requiredFilter,omitempty"`
+	Filter         *SubjectFilter `json:"filter"`
+	Mode           string         `json:"mode,omitempty"`
+	Search         string         `json:"search,omitempty"`
+	Cursor         string         `json:"cursor,omitempty"`
+	Limit          int            `json:"limit,omitempty"`
+}
+
+type CountSubjectsRequest struct {
+	Filter         *SubjectFilter `json:"filter"`
+	RequiredFilter *SubjectFilter `json:"requiredFilter,omitempty"`
+	Search         string         `json:"search,omitempty"`
+}
+
+func (c *CRMClient) CountSubjects(ctx context.Context, projectID string, input CountSubjectsRequest) (int, error) {
+	if !integrationOAuthUUID(projectID) {
+		return 0, fmt.Errorf("integration: CountSubjects requires a UUID projectID")
+	}
+	body, err := json.Marshal(input)
+	if err != nil {
+		return 0, err
+	}
+	req, err := c.bearerRequest(http.MethodPost, "/projects/"+projectID+"/subjects/search/count", nil, body, true)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.do(ctx, req)
+	if err != nil {
+		return 0, err
+	}
+	var out struct {
+		Count *int `json:"count"`
+	}
+	if err := json.Unmarshal(resp.Body, &out); err != nil {
+		return 0, c.decodeError("subject count", err)
+	}
+	if out.Count == nil || *out.Count < 0 {
+		return 0, fmt.Errorf("integration: invalid subject count response")
+	}
+	return *out.Count, nil
 }
 
 // SearchSubjectItem is a subject paired with the filter result.

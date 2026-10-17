@@ -1,5 +1,7 @@
 package integration
 
+import "encoding/json"
+
 // This file defines the typed values the platform embeds in the requests it
 // sends to an integration backend. Unlike earlier versions of the SDK, the
 // action request body is NOT a fixed envelope: the integration author designs it
@@ -34,6 +36,9 @@ type ExecutionContext struct {
 	SchemeID  string  `json:"schemeId,omitempty"`
 	BranchID  string  `json:"branchId,omitempty"`
 	StepID    string  `json:"stepId,omitempty"`
+	// CampaignID is server-authored origin, independent from mutable metadata.
+	CampaignID string          `json:"campaignId,omitempty"`
+	Metadata   json.RawMessage `json:"metadata,omitempty"`
 }
 
 // TriggerSyncRequest is the fixed body the platform POSTs to the integration's

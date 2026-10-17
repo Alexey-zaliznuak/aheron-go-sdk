@@ -25,6 +25,13 @@ vars:
   YDB_GENPROTO_PIN: google.golang.org/genproto@v0.0.0-20260819154853-08b0e4226688
 
 tasks:
+  test:campaigns:
+    desc: Verify campaign event identities, installation OAuth and audience API contracts
+    env:
+      GOWORK: 'off'
+    cmds:
+      - go test ./campaign ./executionevent ./integration -count=1 {{.CLI_ARGS}}
+
   test:readcache:
     desc: Verify Redis cache stampede protection, invalidation and fallback
     env:
