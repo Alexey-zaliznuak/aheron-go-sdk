@@ -66,6 +66,13 @@ type UpdateCampaignParams struct {
 	Metadata         *json.RawMessage `json:"metadata,omitempty"`
 }
 
+// PreparedAudience identifies the immutable audience whose initial state has
+// been durably recorded by the preparing integration.
+type PreparedAudience struct {
+	CampaignCreatedAt  time.Time `json:"campaignCreatedAt"`
+	ExpectedRecipients uint64    `json:"expectedRecipients"`
+}
+
 type NamedTrigger struct {
 	ActivationKey string `json:"activationKey"`
 	Name          string `json:"name"`
@@ -228,6 +235,36 @@ func (c *CampaignClient) Launch(ctx context.Context, projectID, id string, expec
 	}{expectedRevision}
 	var out Campaign
 	err = callResourceJSON(ctx, c.write, c.baseURL, http.MethodPost, path+"/launch", input, &out, false, 200, 202)
+	return out, err
+}
+
+// Prepare resolves the full audience without activating any execution contexts.
+// It requires a server supporting this endpoint; there is no fallback to Launch.
+func (c *CampaignClient) Prepare(ctx context.Context, projectID, id string, expectedRevision uint64) (Campaign, error) {
+	path, err := c.campaignPath(projectID, id)
+	if err != nil {
+		return Campaign{}, err
+	}
+	input := struct {
+		ExpectedRevision uint64 `json:"expectedRevision"`
+	}{expectedRevision}
+	var out Campaign
+	err = callResourceJSON(ctx, c.write, c.baseURL, http.MethodPost, path+"/prepare", input, &out, false, 200, 202)
+	return out, err
+}
+
+// StartPrepared releases a prepared campaign after its full audience is recorded.
+// Repeating the same acknowledgement is safe and never revives cancellation.
+func (c *CampaignClient) StartPrepared(ctx context.Context, projectID, id string, audience PreparedAudience) (Campaign, error) {
+	path, err := c.campaignPath(projectID, id)
+	if err != nil {
+		return Campaign{}, err
+	}
+	if audience.CampaignCreatedAt.IsZero() {
+		return Campaign{}, integrationoauth.ErrRequest
+	}
+	var out Campaign
+	err = callResourceJSON(ctx, c.write, c.baseURL, http.MethodPost, path+"/start-prepared", audience, &out, true, 200)
 	return out, err
 }
 

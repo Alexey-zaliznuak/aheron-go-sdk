@@ -8,10 +8,37 @@ one project and rejects another project's ID before network I/O.
 
 `Create` requires a stable UUID `CommandID` per create intent. Reuse the ID and
 body after an uncertain response. Changed content needs a new command ID.
-`Update` and `Launch` carry the current campaign revision; a conflict requires
-reloading before presenting a new action. Only creation has a durable command
-ledger that permits automatic write replay after a 401. Other writes are not
-automatically replayed.
+`Update`, `Launch` and `Prepare` carry the current campaign revision; a conflict
+requires reloading before presenting a new action. Creation has a durable command
+ledger that permits automatic write replay after a 401. `StartPrepared` is also
+safe to replay; other writes are not automatically replayed.
+
+## Prepare the audience before sending
+
+Integrations that must record the entire audience before execution starts use
+`Prepare` instead of `Launch`. The campaign moves through `preparing` and
+`awaiting_audience`; no execution contexts are activated in either state. The
+existing `Launch` behavior is unchanged. `Prepare` has no fallback to `Launch`
+when the server does not support preparation.
+
+Audience page and completion events for these campaigns include
+`preparationRequired: true`. After durably applying all unique audience members
+and the completion marker, the integration calls `StartPrepared` with
+`PreparedAudience`: the event's `CampaignCreatedAt` and completion marker's
+`ExpectedRecipients`. Completion may arrive before the last audience page, so
+check readiness after either event. A count of zero is valid for an empty audience.
+
+The server checks the immutable campaign identity, finished snapshot and exact
+recipient count before moving to `running` (or `done` for an empty audience).
+Repeating the same acknowledgement is safe, including after an uncertain response;
+it never revives a cancelled campaign. The integration must retain retryable work
+until this acknowledgement succeeds, for example by committing its consumer offset
+only after both the projection and `StartPrepared` have succeeded.
+
+Deploy the supporting campaign API and all audience consumers before enabling
+preparation for new launches. Older consumers ignore the optional event field and
+cannot release a prepared campaign. Events without this field retain their
+existing behavior and require no acknowledgement.
 
 Campaign metadata is a JSON object. The platform supplies the authoritative
 `campaignId` in execution metadata and separately in `ExecutionContext.CampaignID`.

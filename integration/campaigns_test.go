@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/integrationoauth"
 )
@@ -138,7 +139,7 @@ func TestCampaignOAuthScopesAndIsolation(t *testing.T) {
 }
 
 func TestCampaignOnlyCreationReplaysUnauthorizedWrite(t *testing.T) {
-	for _, operation := range []string{"create", "update", "launch", "cancel"} {
+	for _, operation := range []string{"create", "update", "launch", "cancel", "prepare", "start-prepared"} {
 		t.Run(operation, func(t *testing.T) {
 			issues, calls := 0, 0
 			c := campaignOAuthFixture(t, func(w http.ResponseWriter, r *http.Request) {
@@ -164,9 +165,13 @@ func TestCampaignOnlyCreationReplaysUnauthorizedWrite(t *testing.T) {
 				_, _ = c.Campaigns.Launch(ctx, crmOAuthProject, crmOAuthSubject, 1)
 			case "cancel":
 				_, _ = c.Campaigns.Cancel(ctx, crmOAuthProject, crmOAuthSubject)
+			case "prepare":
+				_, _ = c.Campaigns.Prepare(ctx, crmOAuthProject, crmOAuthSubject, 7)
+			case "start-prepared":
+				_, _ = c.Campaigns.StartPrepared(ctx, crmOAuthProject, crmOAuthSubject, PreparedAudience{CampaignCreatedAt: time.Now(), ExpectedRecipients: 100})
 			}
 			want := 1
-			if operation == "create" {
+			if operation == "create" || operation == "start-prepared" {
 				want = 2
 			}
 			if calls != want || issues != want {

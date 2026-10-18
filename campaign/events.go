@@ -44,13 +44,15 @@ type Event struct {
 }
 
 type AudiencePage struct {
-	CampaignCreatedAt time.Time   `json:"campaignCreatedAt"`
-	SubjectIDs        []uuid.UUID `json:"subjectIds"`
+	CampaignCreatedAt   time.Time   `json:"campaignCreatedAt"`
+	SubjectIDs          []uuid.UUID `json:"subjectIds"`
+	PreparationRequired bool        `json:"preparationRequired,omitempty"`
 }
 
 type SnapshotComplete struct {
-	CampaignCreatedAt  time.Time `json:"campaignCreatedAt"`
-	ExpectedRecipients uint64    `json:"expectedRecipients"`
+	CampaignCreatedAt   time.Time `json:"campaignCreatedAt"`
+	ExpectedRecipients  uint64    `json:"expectedRecipients"`
+	PreparationRequired bool      `json:"preparationRequired,omitempty"`
 }
 
 // Context is captured from the trusted execution envelope when the command is
