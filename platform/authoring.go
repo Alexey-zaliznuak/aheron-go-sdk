@@ -179,10 +179,19 @@ func (c *Client) requestJSON(ctx context.Context, operation, method, path string
 		problem := &APIError{Operation: operation, StatusCode: resp.StatusCode}
 		if resp.StatusCode == http.StatusConflict {
 			var body struct {
-				Code string `json:"code"`
+				Code  string          `json:"code"`
+				Error json.RawMessage `json:"error"`
 			}
-			if json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&body) == nil && body.Code == "contract_revision_mismatch" {
-				problem.Code = body.Code
+			if json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&body) == nil {
+				if body.Code == "contract_revision_mismatch" {
+					problem.Code = body.Code
+				}
+				var nested struct {
+					Code string `json:"code"`
+				}
+				if strings.HasPrefix(path, "/analytics/") && json.Unmarshal(body.Error, &nested) == nil && nested.Code == "individual_value_disabled" {
+					problem.Code = nested.Code
+				}
 			}
 		}
 		return problem

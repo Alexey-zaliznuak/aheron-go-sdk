@@ -36,6 +36,7 @@ type Client struct {
 	CRM           *integration.CRMClient
 	Integrations  *platform.IntegrationsClient
 	Documentation *platform.DocumentationClient
+	Analytics     *platform.AnalyticsClient
 }
 
 func New(cfg Config) (*Client, error) {
@@ -77,5 +78,5 @@ func New(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{Projects: p.Projects, Schemes: p.Schemes, Files: p.Files, CRM: i.CRM, Integrations: p.Integrations, Documentation: documentation}, nil
+	return &Client{Projects: p.Projects, Schemes: p.Schemes, Files: p.Files, CRM: i.CRM, Integrations: p.Integrations, Documentation: documentation, Analytics: p.Analytics}, nil
 }

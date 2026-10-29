@@ -15,16 +15,17 @@ import (
 const DefaultBaseURL = "https://aheron.pro/api"
 
 var (
-	ErrConfig                   = errors.New("platform: invalid client configuration")
-	ErrInvalidInput             = errors.New("platform: invalid resource identifier")
-	ErrUnauthorized             = errors.New("platform: unauthorized")
-	ErrForbidden                = errors.New("platform: forbidden")
-	ErrNotFound                 = errors.New("platform: not found")
-	ErrContractRevisionMismatch = errors.New("platform: runtime contract revision mismatch")
-	ErrConflict                 = errors.New("platform: conflict")
-	ErrTransport                = errors.New("platform: API transport failed")
-	ErrResponse                 = errors.New("platform: invalid API response")
-	ErrResponseTooLarge         = errors.New("platform: API response exceeds the size limit")
+	ErrConfig                           = errors.New("platform: invalid client configuration")
+	ErrInvalidInput                     = errors.New("platform: invalid resource identifier")
+	ErrUnauthorized                     = errors.New("platform: unauthorized")
+	ErrForbidden                        = errors.New("platform: forbidden")
+	ErrNotFound                         = errors.New("platform: not found")
+	ErrContractRevisionMismatch         = errors.New("platform: runtime contract revision mismatch")
+	ErrConflict                         = errors.New("platform: conflict")
+	ErrTransport                        = errors.New("platform: API transport failed")
+	ErrResponse                         = errors.New("platform: invalid API response")
+	ErrResponseTooLarge                 = errors.New("platform: API response exceeds the size limit")
+	ErrAnalyticsIndividualValueDisabled = errors.New("platform: individual analytics values are not stored")
 )
 
 // APIError exposes status, but never an upstream body or credential-bearing URL.
@@ -40,6 +41,7 @@ func (e *APIError) Error() string {
 
 func (e *APIError) Is(target error) bool {
 	return (target == ErrContractRevisionMismatch && e.StatusCode == 409 && e.Code == "contract_revision_mismatch") ||
+		(target == ErrAnalyticsIndividualValueDisabled && e.StatusCode == 409 && e.Code == "individual_value_disabled") ||
 		(target == ErrUnauthorized && e.StatusCode == 401) ||
 		(target == ErrForbidden && e.StatusCode == 403) ||
 		(target == ErrNotFound && e.StatusCode == 404) ||
@@ -74,6 +76,7 @@ type Client struct {
 	Schemes          *SchemesClient
 	Files            *FilesClient
 	Integrations     *IntegrationsClient
+	Analytics        *AnalyticsClient
 }
 
 func New(cfg Config) (*Client, error) {
@@ -146,6 +149,7 @@ func (c *Client) bindResources() {
 	c.Schemes = &SchemesClient{client: c}
 	c.Files = &FilesClient{client: c}
 	c.Integrations = &IntegrationsClient{client: c}
+	c.Analytics = &AnalyticsClient{client: c}
 }
 
 // get intentionally performs one request. Credential refresh is explicit in
