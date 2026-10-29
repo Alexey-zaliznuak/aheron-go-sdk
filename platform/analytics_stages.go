@@ -18,12 +18,21 @@ type AnalyticsStageSetInput struct {
 	Stages   []AnalyticsStageDefinition `json:"stages"`
 	Archived bool                       `json:"archived"`
 }
+
+// AnalyticsStageSetSource is server-owned attribution. Bound stage sets are
+// changed through their source contract; their graph and layout remain readable.
+type AnalyticsStageSetSource struct {
+	IntegrationID string `json:"integrationId"`
+	CampaignID    string `json:"campaignId"`
+}
 type AnalyticsStageSet struct {
 	ID       string `json:"id"`
 	Revision string `json:"revision"`
 	AnalyticsStageSetInput
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedAt time.Time                `json:"createdAt"`
+	UpdatedAt time.Time                `json:"updatedAt"`
+	Source    *AnalyticsStageSetSource `json:"source,omitempty"`
+	ReadOnly  bool                     `json:"readOnly"`
 }
 type AnalyticsStageSetPage struct {
 	Items      []AnalyticsStageSet `json:"items"`

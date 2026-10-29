@@ -23,6 +23,9 @@ integration OAuth. Методы CRM не дублируются. `platform` со
 `GetStageTemplateVersion` и `SaveStageTemplate` (контракт `analytics-templates/1`).
 Версии неизменяемы; ключ этапа сохраняется при переименовании. Создание шаблона
 не зачисляет лидов на этапы. Запись принимает `operationId` и `expectedRevision`.
+Набор этапов, созданный привязкой рассылки, возвращает `source` и `readOnly:true`:
+общие команды назначения и изменения определений для него запрещены, граф и
+расположение узлов доступны. Наборы без источника сохраняют обычный режим работы.
 
 `integration.Client.Analytics` использует отдельную `AnalyticsOAuth` с audience
 `analytics` и scopes `analytics.sources.read` / `analytics.sources.write`. Через
