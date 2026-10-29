@@ -143,6 +143,18 @@ func (c *AnalyticsClient) AuthorizeStageWrite(ctx context.Context, project strin
 	}
 	return callResourceJSON(ctx, c.write, c.baseURL, http.MethodGet, p+"/sources/messengers/write-authorization", nil, nil, true, http.StatusNoContent)
 }
+
+// ValidateCampaignStageIntent checks the current write grant and the bound stage
+// before accepting a new external send. It creates no analytics state and does
+// not enroll a subject. Accepted durable retries reuse their original intent.
+func (c *AnalyticsClient) ValidateCampaignStageIntent(ctx context.Context, project, campaign string, in platform.AnalyticsCampaignStageIntent) error {
+	p, err := c.bindingPath(project, campaign)
+	if err != nil || !integrationOAuthUUID(in.TemplateID) || !revisionOK(in.TemplateRevision, false) || !revisionOK(in.SourceGeneration, false) || !analyticsSourceStageKey(in.StageKey) {
+		return integrationoauth.ErrRequest
+	}
+	return callResourceJSON(ctx, c.write, c.baseURL, http.MethodPost, p+"/intent-check", in, nil, true, http.StatusNoContent)
+}
+
 func (c *AnalyticsClient) GetCampaignStageBinding(ctx context.Context, project, campaign string) (platform.AnalyticsCampaignStageBinding, error) {
 	var out platform.AnalyticsCampaignStageBinding
 	p, e := c.bindingPath(project, campaign)

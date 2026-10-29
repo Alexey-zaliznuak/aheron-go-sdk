@@ -91,6 +91,15 @@ type AnalyticsCampaignStageCommand struct {
 	StageKey         string    `json:"stageKey"`
 }
 
+// AnalyticsCampaignStageIntent selects an immutable template stage. Ownership
+// and current installation are supplied by the authenticated request context.
+type AnalyticsCampaignStageIntent struct {
+	TemplateID       string `json:"templateId"`
+	TemplateRevision string `json:"templateRevision"`
+	StageKey         string `json:"stageKey"`
+	SourceGeneration string `json:"sourceGeneration"`
+}
+
 func analyticsTemplateValid(v AnalyticsStageTemplate) bool {
 	if !analyticsIDs(v.TemplateID) || !analyticsRevision(v.Revision, true) || !analyticsRevision(v.ParentRevision, false) || len(v.Stages) == 0 || len(v.Stages) > 32 || v.CreatedAt.IsZero() || v.UpdatedAt.IsZero() {
 		return false

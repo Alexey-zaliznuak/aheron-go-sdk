@@ -38,9 +38,11 @@ integration OAuth. Методы CRM не дублируются. `platform` со
 `campaign.SourceProofClient` читает серверное подтверждение интеграции-владельца;
 оно само по себе не подтверждает актуальность OAuth-доступа. Для этого служит
 `integrationoauth.ResourceVerifier` с онлайн-проверкой токена, audience и scopes.
-Перед приёмом нового `requestedStage` провайдер вызывает `AuthorizeStageWrite`:
-чистую онлайн-проверку актуального `analytics.sources.write`. Наличие токена в
-кеше не заменяет её. Уже принятые и сохранённые события обрабатываются независимо
+Перед приёмом нового `requestedStage` провайдер вызывает `ValidateCampaignStageIntent`:
+чистую онлайн-проверку актуального `analytics.sources.write` и соответствия
+зафиксированных template/version/key/sourceGeneration привязке рассылки.
+`AuthorizeStageWrite` остаётся чистой проверкой права для интерфейса возможностей.
+Наличие токена в кеше не заменяет проверку. Уже принятые и сохранённые события обрабатываются независимо
 от последующего отзыва установки; повтор не превращается в новую операцию.
 
 `AnalyticsCampaignStageCommand` описывает native currentCampaign команду для

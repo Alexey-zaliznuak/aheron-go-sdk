@@ -99,6 +99,26 @@ func TestAnalyticsOAuthScopesReplayAndStableOwnership(t *testing.T) {
 			}
 			status = 200
 			binding := platform.AnalyticsCampaignStageBinding{ProjectID: crmOAuthProject, IntegrationID: crmOAuthIntegration, CampaignID: crmOAuthSubject, ExperimentID: crmOAuthProject, TemplateID: template.TemplateID, TemplateRevision: template.Revision, StageSetID: crmOAuthIntegration, Stages: []platform.AnalyticsBoundStage{{Key: "received", StageID: crmOAuthSubject}}, Revision: "1", SourceGeneration: "1", MigrationState: "native", CreatedAt: time.Now()}
+			intent := platform.AnalyticsCampaignStageIntent{TemplateID: template.TemplateID, TemplateRevision: template.Revision, StageKey: "received", SourceGeneration: "1"}
+			method, path, status = "POST", base+"/installations/"+installation+"/campaigns/"+crmOAuthSubject+"/intent-check", 204
+			if err := c.ValidateCampaignStageIntent(ctx, crmOAuthProject, crmOAuthSubject, intent); err != nil {
+				t.Fatal(err)
+			}
+			var recorded platform.AnalyticsCampaignStageIntent
+			if json.Unmarshal([]byte(bodies[len(bodies)-1]), &recorded) != nil || recorded != intent {
+				t.Fatal("intent check changed frozen selection")
+			}
+			status = 409
+			beforeConflict := len(bodies)
+			if err := c.ValidateCampaignStageIntent(ctx, crmOAuthProject, crmOAuthSubject, intent); err == nil || len(bodies) != beforeConflict+1 {
+				t.Fatal("binding mismatch hidden or retried", err)
+			}
+			intent.SourceGeneration = "01"
+			beforeInvalid := len(bodies)
+			if err := c.ValidateCampaignStageIntent(ctx, crmOAuthProject, crmOAuthSubject, intent); !errors.Is(err, integrationoauth.ErrRequest) || len(bodies) != beforeInvalid {
+				t.Fatal("invalid generation performed I/O", err)
+			}
+			status = 200
 			path = base + "/installations/" + installation + "/campaigns/" + crmOAuthSubject + "/binding"
 			method, reply, unauthorized = "PUT", binding, true
 			input := platform.AnalyticsCreateCampaignStageBinding{OperationID: crmOAuthProject, ExpectedRevision: "0", TemplateID: template.TemplateID, TemplateRevision: template.Revision}
