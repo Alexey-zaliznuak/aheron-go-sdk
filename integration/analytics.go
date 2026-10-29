@@ -131,6 +131,18 @@ func (c *AnalyticsClient) EnsureDefaultStageTemplate(ctx context.Context, projec
 	}
 	return out, e
 }
+
+// AuthorizeStageWrite checks the current grant before accepting a new durable
+// stage intent. It has no analytics data side effects. A cached OAuth token alone
+// cannot prove that the installation's write permission has not been revoked.
+// Already accepted observations are subsequently projected without this check.
+func (c *AnalyticsClient) AuthorizeStageWrite(ctx context.Context, project string) error {
+	p, err := c.projectPath(project)
+	if err != nil {
+		return err
+	}
+	return callResourceJSON(ctx, c.write, c.baseURL, http.MethodGet, p+"/sources/messengers/write-authorization", nil, nil, true, http.StatusNoContent)
+}
 func (c *AnalyticsClient) GetCampaignStageBinding(ctx context.Context, project, campaign string) (platform.AnalyticsCampaignStageBinding, error) {
 	var out platform.AnalyticsCampaignStageBinding
 	p, e := c.bindingPath(project, campaign)

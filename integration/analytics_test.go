@@ -88,6 +88,16 @@ func TestAnalyticsOAuthScopesReplayAndStableOwnership(t *testing.T) {
 			if _, err := c.EnsureDefaultStageTemplate(ctx, crmOAuthProject, crmOAuthSubject); err != nil {
 				t.Fatal(err)
 			}
+			method, path, status = "GET", base+"/write-authorization", 204
+			if err := c.AuthorizeStageWrite(ctx, crmOAuthProject); err != nil {
+				t.Fatal(err)
+			}
+			status = 403
+			beforeDenied := len(bodies)
+			if err := c.AuthorizeStageWrite(ctx, crmOAuthProject); err == nil || len(bodies) != beforeDenied+1 {
+				t.Fatal("revoked grant hidden or retried", err)
+			}
+			status = 200
 			binding := platform.AnalyticsCampaignStageBinding{ProjectID: crmOAuthProject, IntegrationID: crmOAuthIntegration, CampaignID: crmOAuthSubject, ExperimentID: crmOAuthProject, TemplateID: template.TemplateID, TemplateRevision: template.Revision, StageSetID: crmOAuthIntegration, Stages: []platform.AnalyticsBoundStage{{Key: "received", StageID: crmOAuthSubject}}, Revision: "1", SourceGeneration: "1", MigrationState: "native", CreatedAt: time.Now()}
 			path = base + "/installations/" + installation + "/campaigns/" + crmOAuthSubject + "/binding"
 			method, reply, unauthorized = "PUT", binding, true
