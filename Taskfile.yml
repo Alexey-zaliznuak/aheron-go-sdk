@@ -131,7 +131,7 @@ tasks:
     desc: 'Verify OAuth assertions, cache isolation, concurrency and HTTP retry boundaries (optional -- -race)'
     cmds:
       - go test ./integrationoauth -count=1 -timeout=2m {{.CLI_ARGS}}
-      - go test ./integration -run '^TestExecutionOAuth|^TestCRMOAuth|^TestFilesOAuth|^TestLinksOAuth|^TestApplicationOAuth' -count=1 -timeout=2m {{.CLI_ARGS}}
+      - go test ./integration -run '^TestExecutionOAuth|^TestCRMOAuth|^TestFilesOAuth|^TestLinksOAuth|^TestApplicationOAuth|^TestAnalyticsOAuth|^TestAnalyticsDoesNot' -count=1 -timeout=2m {{.CLI_ARGS}}
 
   build:
     desc: Build both SDK modules

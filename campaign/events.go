@@ -58,14 +58,15 @@ type SnapshotComplete struct {
 // Context is captured from the trusted execution envelope when the command is
 // accepted. Do not reconstruct it from a context that may have been restarted.
 type Context struct {
-	CampaignID         uuid.UUID  `json:"campaignId"`
-	SubjectID          uuid.UUID  `json:"subjectId"`
-	DeliveryID         uuid.UUID  `json:"deliveryId"`
-	ExecutionContextID uuid.UUID  `json:"executionContextId"`
-	ContextVersion     int64      `json:"contextVersion"`
-	SchemeID           *uuid.UUID `json:"schemeId,omitempty"`
-	StepID             *uuid.UUID `json:"stepId,omitempty"`
-	RequestedStatusID  *uuid.UUID `json:"requestedStatusId,omitempty"`
+	CampaignID         uuid.UUID    `json:"campaignId"`
+	SubjectID          uuid.UUID    `json:"subjectId"`
+	DeliveryID         uuid.UUID    `json:"deliveryId"`
+	ExecutionContextID uuid.UUID    `json:"executionContextId"`
+	ContextVersion     int64        `json:"contextVersion"`
+	SchemeID           *uuid.UUID   `json:"schemeId,omitempty"`
+	StepID             *uuid.UUID   `json:"stepId,omitempty"`
+	RequestedStatusID  *uuid.UUID   `json:"requestedStatusId,omitempty"`
+	RequestedStage     *StageIntent `json:"requestedStage,omitempty"`
 }
 
 // DeliveryObservation changes exactly the dimension selected by Event.Kind.
@@ -74,28 +75,29 @@ type Context struct {
 // reflected error body. SubjectID in the envelope is the scenario participant;
 // RecipientSubjectID identifies the actual addressee (which may be different).
 type DeliveryObservation struct {
-	ExecutionContextID  uuid.UUID  `json:"executionContextId"`
-	ContextVersion      int64      `json:"contextVersion"`
-	SchemeID            *uuid.UUID `json:"schemeId,omitempty"`
-	StepID              *uuid.UUID `json:"stepId,omitempty"`
-	ChannelID           *uuid.UUID `json:"channelId,omitempty"`
-	DialogID            *uuid.UUID `json:"dialogId,omitempty"`
-	MessageID           *uuid.UUID `json:"messageId,omitempty"`
-	PeerID              *uuid.UUID `json:"peerId,omitempty"`
-	RecipientSubjectID  *uuid.UUID `json:"recipientSubjectId,omitempty"`
-	RecipientKind       string     `json:"recipientKind,omitempty"`
-	ExternalRecipientID string     `json:"externalRecipientId,omitempty"`
-	Platform            string     `json:"platform,omitempty"`
-	RequestedStatusID   *uuid.UUID `json:"requestedStatusId,omitempty"`
-	State               string     `json:"state"`
-	ErrorClass          string     `json:"errorClass,omitempty"`
-	ErrorCode           string     `json:"errorCode,omitempty"`
-	PlatformAttempts    uint32     `json:"platformAttempts,omitempty"`
-	SentPartCount       uint32     `json:"sentPartCount,omitempty"`
-	ExternalMessageIDs  []string   `json:"externalMessageIds,omitempty"`
-	QueuedAt            *time.Time `json:"queuedAt,omitempty"`
-	SentAt              *time.Time `json:"sentAt,omitempty"`
-	FinishedAt          *time.Time `json:"finishedAt,omitempty"`
+	ExecutionContextID  uuid.UUID    `json:"executionContextId"`
+	ContextVersion      int64        `json:"contextVersion"`
+	SchemeID            *uuid.UUID   `json:"schemeId,omitempty"`
+	StepID              *uuid.UUID   `json:"stepId,omitempty"`
+	ChannelID           *uuid.UUID   `json:"channelId,omitempty"`
+	DialogID            *uuid.UUID   `json:"dialogId,omitempty"`
+	MessageID           *uuid.UUID   `json:"messageId,omitempty"`
+	PeerID              *uuid.UUID   `json:"peerId,omitempty"`
+	RecipientSubjectID  *uuid.UUID   `json:"recipientSubjectId,omitempty"`
+	RecipientKind       string       `json:"recipientKind,omitempty"`
+	ExternalRecipientID string       `json:"externalRecipientId,omitempty"`
+	Platform            string       `json:"platform,omitempty"`
+	RequestedStatusID   *uuid.UUID   `json:"requestedStatusId,omitempty"`
+	RequestedStage      *StageIntent `json:"requestedStage,omitempty"`
+	State               string       `json:"state"`
+	ErrorClass          string       `json:"errorClass,omitempty"`
+	ErrorCode           string       `json:"errorCode,omitempty"`
+	PlatformAttempts    uint32       `json:"platformAttempts,omitempty"`
+	SentPartCount       uint32       `json:"sentPartCount,omitempty"`
+	ExternalMessageIDs  []string     `json:"externalMessageIds,omitempty"`
+	QueuedAt            *time.Time   `json:"queuedAt,omitempty"`
+	SentAt              *time.Time   `json:"sentAt,omitempty"`
+	FinishedAt          *time.Time   `json:"finishedAt,omitempty"`
 }
 
 func DeliveryID(executionContextID uuid.UUID, contextVersion int64) uuid.UUID {

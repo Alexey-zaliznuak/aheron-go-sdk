@@ -42,6 +42,7 @@ const (
 	DefaultCatalogURL   = "https://aheron.pro/api"
 	DefaultLinksURL     = "https://link.aheron.pro/api"
 	DefaultCampaignURL  = "https://aheron.pro/api/campaigns"
+	DefaultAnalyticsURL = "https://aheron.pro/api/analytics"
 )
 
 // DefaultJWKSURL is the platform's well-known integration JWKS endpoint on
@@ -70,8 +71,10 @@ type Config struct {
 	// CRMOAuth authenticates every CRM method for one project installation.
 	CRMOAuth *CRMOAuthConfig
 	// CampaignOAuth authenticates campaign read/write and trigger catalog access.
-	CampaignOAuth *CampaignOAuthConfig
-	CampaignURL   string
+	CampaignOAuth  *CampaignOAuthConfig
+	CampaignURL    string
+	AnalyticsOAuth *AnalyticsOAuthConfig
+	AnalyticsURL   string
 	// BackendURL carries the platform /api prefix for the named trigger catalog.
 	BackendURL string
 	// FilesOAuth authenticates all Files methods for one project installation.
@@ -127,6 +130,7 @@ type Client struct {
 	// CRM reads and writes data using CRMOAuth or an explicit project API key.
 	CRM       *CRMClient
 	Campaigns *CampaignClient
+	Analytics *AnalyticsClient
 	// Files stores and retrieves project media files with FilesOAuth or a project API key.
 	Files *FilesClient
 	// Catalog publishes this integration's own block and endpoint declarations.
@@ -151,6 +155,9 @@ func New(cfg Config) (*Client, error) {
 	}
 	if cfg.CampaignURL == "" {
 		cfg.CampaignURL = DefaultCampaignURL
+	}
+	if cfg.AnalyticsURL == "" {
+		cfg.AnalyticsURL = DefaultAnalyticsURL
 	}
 	if cfg.BackendURL == "" {
 		cfg.BackendURL = DefaultCatalogURL
@@ -208,6 +215,10 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	c := &Client{integrationID: cfg.IntegrationID}
+	c.Analytics, err = newAnalyticsClient(cfg.AnalyticsURL, cfg.AnalyticsOAuth)
+	if err != nil {
+		return nil, err
+	}
 	c.Campaigns, err = newCampaignClient(cfg.CampaignURL, cfg.BackendURL, cfg.CampaignOAuth)
 	if err != nil {
 		return nil, err

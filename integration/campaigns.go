@@ -28,6 +28,8 @@ type CampaignClient struct {
 }
 
 type Campaign struct {
+	PreparationMode    string          `json:"preparationMode,omitempty"`
+	OwnerIntegrationID *string         `json:"ownerIntegrationId,omitempty"`
 	ID                 string          `json:"id"`
 	ProjectID          string          `json:"projectId"`
 	Name               string          `json:"name"`
@@ -49,12 +51,13 @@ type Campaign struct {
 // CommandID is a stable UUID per create intent. Reuse it after an ambiguous
 // response with the same body; a changed body needs a new command ID.
 type CreateCampaignParams struct {
-	CommandID      string          `json:"commandId"`
-	Name           string          `json:"name"`
-	ActivationKey  string          `json:"activationKey"`
-	Filter         json.RawMessage `json:"filter,omitempty"`
-	RequiredFilter json.RawMessage `json:"requiredFilter,omitempty"`
-	Metadata       json.RawMessage `json:"metadata,omitempty"`
+	PreparationMode string          `json:"preparationMode,omitempty"`
+	CommandID       string          `json:"commandId"`
+	Name            string          `json:"name"`
+	ActivationKey   string          `json:"activationKey"`
+	Filter          json.RawMessage `json:"filter,omitempty"`
+	RequiredFilter  json.RawMessage `json:"requiredFilter,omitempty"`
+	Metadata        json.RawMessage `json:"metadata,omitempty"`
 }
 
 type UpdateCampaignParams struct {
