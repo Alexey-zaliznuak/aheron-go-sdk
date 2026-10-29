@@ -53,6 +53,8 @@ type AnalyticsAssignStage struct {
 	StageID     string `json:"stageId"`
 }
 type AnalyticsStageReceipt struct {
+	GraphChanged    bool      `json:"graphChanged,omitempty"`
+	Late            bool      `json:"late,omitempty"`
 	OperationID     string    `json:"operationId"`
 	StageSetID      string    `json:"stageSetId"`
 	SubjectID       string    `json:"subjectId"`

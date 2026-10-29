@@ -69,11 +69,26 @@ type AnalyticsCampaignStageEvent struct {
 	DeliveryID       string    `json:"deliveryId"`
 }
 type AnalyticsCampaignStageEventResult struct {
-	EventID  string                 `json:"eventId"`
-	Accepted bool                   `json:"accepted"`
-	Changed  bool                   `json:"changed"`
-	Stale    bool                   `json:"stale"`
-	Receipt  *AnalyticsStageReceipt `json:"receipt,omitempty"`
+	EventID      string                 `json:"eventId"`
+	Accepted     bool                   `json:"accepted"`
+	Changed      bool                   `json:"changed"`
+	Stale        bool                   `json:"stale"`
+	GraphChanged bool                   `json:"graphChanged,omitempty"`
+	Late         bool                   `json:"late,omitempty"`
+	Receipt      *AnalyticsStageReceipt `json:"receipt,omitempty"`
+}
+
+// AnalyticsCampaignStageCommand is a trusted execution command. Its campaign is
+// taken from the execution context and resolved by the analytics service; it does
+// not accept installation or integration ownership from user settings. OccurredAt
+// and OperationID must be frozen once with the durable execution dispatch.
+type AnalyticsCampaignStageCommand struct {
+	OperationID      string    `json:"operationId"`
+	SubjectID        string    `json:"subjectId"`
+	OccurredAt       time.Time `json:"occurredAt"`
+	TemplateID       string    `json:"templateId"`
+	TemplateRevision string    `json:"templateRevision"`
+	StageKey         string    `json:"stageKey"`
 }
 
 func analyticsTemplateValid(v AnalyticsStageTemplate) bool {

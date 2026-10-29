@@ -43,6 +43,13 @@ integration OAuth. Методы CRM не дублируются. `platform` со
 кеше не заменяет её. Уже принятые и сохранённые события обрабатываются независимо
 от последующего отзыва установки; повтор не превращается в новую операцию.
 
+`AnalyticsCampaignStageCommand` описывает native currentCampaign команду для
+доверенного execution dispatch: campaignId берётся из реального контекста,
+occurredAt и operationId фиксируются до доставки. В ordered source contract
+`analytics-sources/2` результат различает смену текущего этапа (`changed`), поправку
+графа (`graphChanged`) и запоздалую вставку (`late`). Новый runtime и live capability
+должны быть опубликованы до включения такого режима; наличие DTO в SDK этого не подтверждает.
+
 SDK для построения бэкендов интеграций Aheron на Go. Закрывает **обе** стороны
 модели доверия платформы:
 
