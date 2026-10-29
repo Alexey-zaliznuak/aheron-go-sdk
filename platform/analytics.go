@@ -26,6 +26,8 @@ const (
 
 type AnalyticsCapabilities struct {
 	ContractRevision          string   `json:"contractRevision"`
+	StageContractRevision     string   `json:"stageContractRevision,omitempty"`
+	MaxStages                 int      `json:"maxStages,omitempty"`
 	DashboardContractRevision string   `json:"dashboardContractRevision"`
 	MaxDashboardPanels        int      `json:"maxDashboardPanels"`
 	MetricTypes               []string `json:"metricTypes"`
@@ -107,17 +109,19 @@ type AnalyticsIncrement struct {
 	Delta    int64  `json:"delta"`
 }
 type AnalyticsCommand struct {
-	OperationID    string                `json:"operationId"`
-	SubjectID      string                `json:"subjectId"`
-	JoinAudiences  []string              `json:"joinAudiences,omitempty"`
-	AssignVariants []AnalyticsAssignment `json:"assignVariants,omitempty"`
-	Increments     []AnalyticsIncrement  `json:"increments,omitempty"`
+	OperationID    string                     `json:"operationId"`
+	SubjectID      string                     `json:"subjectId"`
+	JoinAudiences  []string                   `json:"joinAudiences,omitempty"`
+	AssignVariants []AnalyticsAssignment      `json:"assignVariants,omitempty"`
+	Increments     []AnalyticsIncrement       `json:"increments,omitempty"`
+	AssignStages   []AnalyticsStageAssignment `json:"assignStages,omitempty"`
 }
 type AnalyticsReceipt struct {
-	OperationID     string    `json:"operationId"`
-	AcceptedAt      time.Time `json:"acceptedAt"`
-	EventIDs        []string  `json:"eventIds"`
-	SubjectSequence uint64    `json:"subjectSequence"`
+	OperationID      string                  `json:"operationId"`
+	AcceptedAt       time.Time               `json:"acceptedAt"`
+	EventIDs         []string                `json:"eventIds"`
+	SubjectSequence  uint64                  `json:"subjectSequence"`
+	StageAssignments []AnalyticsStageReceipt `json:"stageAssignments,omitempty"`
 }
 type AnalyticsDashboardPeriod struct {
 	Kind     string `json:"kind"`
