@@ -103,7 +103,9 @@ func TestAnalyticsResourcePathsAndExactValues(t *testing.T) {
 		t.Fatal("command retry changed")
 	}
 	d := AnalyticsDashboard{ID: otherID, Revision: "9007199254740993", CreatedAt: now, UpdatedAt: now, AnalyticsDashboardInput: AnalyticsDashboardInput{Name: "Overview", Period: AnalyticsDashboardPeriod{Kind: "relative", Relative: "7d"}, Panels: []AnalyticsDashboardPanel{}}}
+	lineWidth, pointSize, visible, height := 3.5, 8, false, 450
 	d.Panels = []AnalyticsDashboardPanel{
+		{ID: otherID, Name: "Styled", MetricID: schemeID, Calculation: "sum", Interval: "day", View: "lines", Appearance: &AnalyticsDashboardAppearance{Width: "half", Height: &height, LineWidth: &lineWidth, PointSize: &pointSize, ShowPoints: &visible, ShowLegend: &visible, SeriesColors: map[string]string{"all": "#abcdef"}}},
 		{ID: otherID, Name: "Participants", Type: "stageStat", StageSetID: schemeID, StageMeasure: "participants"},
 		{ID: projectID, Name: "Reached", Type: "stageStat", StageSetID: schemeID, StageID: otherID, StageMeasure: "uniqueSubjects"},
 		{ID: schemeID, Name: "Graph", Type: "stageGraph", StageSetID: schemeID},

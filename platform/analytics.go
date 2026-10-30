@@ -25,23 +25,24 @@ const (
 )
 
 type AnalyticsCapabilities struct {
-	ContractRevision          string   `json:"contractRevision"`
-	StageContractRevision     string   `json:"stageContractRevision,omitempty"`
-	MaxStages                 int      `json:"maxStages,omitempty"`
-	DashboardContractRevision string   `json:"dashboardContractRevision"`
-	MaxDashboardPanels        int      `json:"maxDashboardPanels"`
-	DashboardPanelTypes       []string `json:"dashboardPanelTypes,omitempty"`
-	MetricTypes               []string `json:"metricTypes"`
-	Calculations              []string `json:"calculations"`
-	Intervals                 []string `json:"intervals"`
-	Membership                string   `json:"membership"`
-	Assignment                string   `json:"assignment"`
-	EventTime                 string   `json:"eventTime"`
-	IndividualStorage         string   `json:"individualStorage"`
-	MaxAudiencesPerSubject    int      `json:"maxAudiencesPerSubject"`
-	MaxPartitionsPerSubject   int      `json:"maxPartitionsPerSubject"`
-	Consistency               string   `json:"consistency"`
-	Completeness              string   `json:"completeness"`
+	ContractRevision            string   `json:"contractRevision"`
+	StageContractRevision       string   `json:"stageContractRevision,omitempty"`
+	MaxStages                   int      `json:"maxStages,omitempty"`
+	DashboardAppearanceRevision string   `json:"dashboardAppearanceRevision,omitempty"`
+	DashboardContractRevision   string   `json:"dashboardContractRevision"`
+	MaxDashboardPanels          int      `json:"maxDashboardPanels"`
+	DashboardPanelTypes         []string `json:"dashboardPanelTypes,omitempty"`
+	MetricTypes                 []string `json:"metricTypes"`
+	Calculations                []string `json:"calculations"`
+	Intervals                   []string `json:"intervals"`
+	Membership                  string   `json:"membership"`
+	Assignment                  string   `json:"assignment"`
+	EventTime                   string   `json:"eventTime"`
+	IndividualStorage           string   `json:"individualStorage"`
+	MaxAudiencesPerSubject      int      `json:"maxAudiencesPerSubject"`
+	MaxPartitionsPerSubject     int      `json:"maxPartitionsPerSubject"`
+	Consistency                 string   `json:"consistency"`
+	Completeness                string   `json:"completeness"`
 }
 type AnalyticsVariant struct {
 	ID   string `json:"id"`
@@ -131,21 +132,36 @@ type AnalyticsDashboardPeriod struct {
 	To       string `json:"to,omitempty"`
 }
 type AnalyticsDashboardPanel struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	MetricID     string `json:"metricId,omitempty"`
-	Calculation  string `json:"calculation,omitempty"`
-	Interval     string `json:"interval,omitempty"`
-	View         string `json:"view,omitempty"`
-	AudienceID   string `json:"audienceId,omitempty"`
-	PartitionID  string `json:"partitionId,omitempty"`
-	Type         string `json:"type,omitempty"`
-	StageSetID   string `json:"stageSetId,omitempty"`
-	StageID      string `json:"stageId,omitempty"`
-	StageMeasure string `json:"stageMeasure,omitempty"`
-	FromStageID  string `json:"fromStageId,omitempty"`
-	ToStageID    string `json:"toStageId,omitempty"`
+	Appearance   *AnalyticsDashboardAppearance `json:"appearance,omitempty"`
+	ID           string                        `json:"id"`
+	Name         string                        `json:"name"`
+	MetricID     string                        `json:"metricId,omitempty"`
+	Calculation  string                        `json:"calculation,omitempty"`
+	Interval     string                        `json:"interval,omitempty"`
+	View         string                        `json:"view,omitempty"`
+	AudienceID   string                        `json:"audienceId,omitempty"`
+	PartitionID  string                        `json:"partitionId,omitempty"`
+	Type         string                        `json:"type,omitempty"`
+	StageSetID   string                        `json:"stageSetId,omitempty"`
+	StageID      string                        `json:"stageId,omitempty"`
+	StageMeasure string                        `json:"stageMeasure,omitempty"`
+	FromStageID  string                        `json:"fromStageId,omitempty"`
+	ToStageID    string                        `json:"toStageId,omitempty"`
 }
+type AnalyticsDashboardAppearance struct {
+	Width        string            `json:"width,omitempty" enums:"third,half,full"`
+	Height       *int              `json:"height,omitempty" minimum:"200" maximum:"1200"`
+	Color        string            `json:"color,omitempty"`
+	LineWidth    *float64          `json:"lineWidth,omitempty" minimum:"1" maximum:"10"`
+	PointSize    *int              `json:"pointSize,omitempty" minimum:"1" maximum:"20"`
+	ShowPoints   *bool             `json:"showPoints,omitempty"`
+	ShowLegend   *bool             `json:"showLegend,omitempty"`
+	YMin         *float64          `json:"yMin,omitempty"`
+	YMax         *float64          `json:"yMax,omitempty"`
+	ValueSize    *int              `json:"valueSize,omitempty" minimum:"16" maximum:"72"`
+	SeriesColors map[string]string `json:"seriesColors,omitempty"`
+}
+
 type AnalyticsDashboardInput struct {
 	Name     string                    `json:"name"`
 	Period   AnalyticsDashboardPeriod  `json:"period"`
