@@ -30,6 +30,7 @@ type AnalyticsCapabilities struct {
 	MaxStages                 int      `json:"maxStages,omitempty"`
 	DashboardContractRevision string   `json:"dashboardContractRevision"`
 	MaxDashboardPanels        int      `json:"maxDashboardPanels"`
+	DashboardPanelTypes       []string `json:"dashboardPanelTypes,omitempty"`
 	MetricTypes               []string `json:"metricTypes"`
 	Calculations              []string `json:"calculations"`
 	Intervals                 []string `json:"intervals"`
@@ -130,14 +131,20 @@ type AnalyticsDashboardPeriod struct {
 	To       string `json:"to,omitempty"`
 }
 type AnalyticsDashboardPanel struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	MetricID    string `json:"metricId"`
-	Calculation string `json:"calculation"`
-	Interval    string `json:"interval"`
-	View        string `json:"view"`
-	AudienceID  string `json:"audienceId,omitempty"`
-	PartitionID string `json:"partitionId,omitempty"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	MetricID     string `json:"metricId,omitempty"`
+	Calculation  string `json:"calculation,omitempty"`
+	Interval     string `json:"interval,omitempty"`
+	View         string `json:"view,omitempty"`
+	AudienceID   string `json:"audienceId,omitempty"`
+	PartitionID  string `json:"partitionId,omitempty"`
+	Type         string `json:"type,omitempty"`
+	StageSetID   string `json:"stageSetId,omitempty"`
+	StageID      string `json:"stageId,omitempty"`
+	StageMeasure string `json:"stageMeasure,omitempty"`
+	FromStageID  string `json:"fromStageId,omitempty"`
+	ToStageID    string `json:"toStageId,omitempty"`
 }
 type AnalyticsDashboardInput struct {
 	Name     string                    `json:"name"`

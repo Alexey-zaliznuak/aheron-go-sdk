@@ -103,6 +103,12 @@ func TestAnalyticsResourcePathsAndExactValues(t *testing.T) {
 		t.Fatal("command retry changed")
 	}
 	d := AnalyticsDashboard{ID: otherID, Revision: "9007199254740993", CreatedAt: now, UpdatedAt: now, AnalyticsDashboardInput: AnalyticsDashboardInput{Name: "Overview", Period: AnalyticsDashboardPeriod{Kind: "relative", Relative: "7d"}, Panels: []AnalyticsDashboardPanel{}}}
+	d.Panels = []AnalyticsDashboardPanel{
+		{ID: otherID, Name: "Participants", Type: "stageStat", StageSetID: schemeID, StageMeasure: "participants"},
+		{ID: projectID, Name: "Reached", Type: "stageStat", StageSetID: schemeID, StageID: otherID, StageMeasure: "uniqueSubjects"},
+		{ID: schemeID, Name: "Graph", Type: "stageGraph", StageSetID: schemeID},
+		{ID: otherID, Name: "Conversion", Type: "stageConversion", StageSetID: schemeID, FromStageID: projectID, ToStageID: otherID},
+	}
 	wantMethod, wantPath = "PUT", folder+"/dashboards/"+otherID
 	response = d
 	save := AnalyticsSaveDashboard{OperationID: projectID, ExpectedRevision: "9007199254740992", Dashboard: d.AnalyticsDashboardInput}
