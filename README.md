@@ -846,3 +846,12 @@ Clients support an explicit `DisableTimeout: true` transport option. It removes 
 Campaign integrations use `client.Campaigns`, CRM audience helpers and the
 `campaign`/`executionevent` event contracts. See [campaign integration contracts](docs/campaigns.md)
 for scopes, revisions, attribution and replay boundaries; run `task test:campaigns`.
+
+`integration.AnalyticsClient.GetCampaignStageSummary(ctx, projectID, campaignID)`
+uses current installation OAuth `analytics.sources.read` and returns
+`platform.AnalyticsCampaignStageSummary{Binding, StageSet, Graph}`. The API resolves
+only the campaign's stable binding; no arbitrary graph IDs, ensure, or enrollment.
+Stage definitions include archived entries; all counters remain exact decimal
+strings. Missing binding stays an explicit API error. Binding experiment/stage-set
+IDs support direct links to the platform analytics graph. Requires the additive
+source summary endpoint in analytics-service (`analytics-sources/2` unchanged).

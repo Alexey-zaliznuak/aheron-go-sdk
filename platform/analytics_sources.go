@@ -50,6 +50,15 @@ type AnalyticsCampaignStageBinding struct {
 	MigrationState   string                `json:"migrationState"`
 	CreatedAt        time.Time             `json:"createdAt"`
 }
+
+// AnalyticsCampaignStageSummary is a read-only snapshot resolved from the stable
+// campaign binding. Binding IDs identify the folder and graph for deep links.
+type AnalyticsCampaignStageSummary struct {
+	Binding  AnalyticsCampaignStageBinding `json:"binding"`
+	StageSet AnalyticsStageSet             `json:"stageSet"`
+	Graph    AnalyticsStageGraph           `json:"graph"`
+}
+
 type AnalyticsCreateCampaignStageBinding struct {
 	OperationID        string `json:"operationId"`
 	ExpectedRevision   string `json:"expectedRevision"`

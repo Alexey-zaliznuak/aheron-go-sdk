@@ -210,3 +210,70 @@ func (c *AnalyticsClient) AcceptCampaignStageEvent(ctx context.Context, project,
 	}
 	return out, e
 }
+
+// GetCampaignStageSummary reads the campaign's bound graph through current
+// installation OAuth. It never creates a binding and cannot select arbitrary
+// folders or stage sets. Archived definitions remain available for history.
+func (c *AnalyticsClient) GetCampaignStageSummary(ctx context.Context, project, campaign string) (platform.AnalyticsCampaignStageSummary, error) {
+	var out platform.AnalyticsCampaignStageSummary
+	p, err := c.bindingPath(project, campaign)
+	if err != nil {
+		return out, err
+	}
+	err = callResourceJSON(ctx, c.read, c.baseURL, http.MethodGet, p+"/summary", nil, &out, true, 200)
+	if err != nil {
+		return out, err
+	}
+	if _, err = c.checkBinding(out.Binding, project, campaign, nil); err != nil {
+		return out, err
+	}
+	if !analyticsSummaryValid(out) {
+		return out, errCampaignResponse
+	}
+	return out, nil
+}
+func analyticsCount(v string) bool {
+	if v == "" || len(v) > 1 && v[0] == '0' {
+		return false
+	}
+	for _, c := range v {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+func analyticsSummaryValid(v platform.AnalyticsCampaignStageSummary) bool {
+	s, g, b := v.StageSet, v.Graph, v.Binding
+	if s.ID != b.StageSetID || g.StageSetID != s.ID || s.Source == nil || s.Source.IntegrationID != b.IntegrationID || s.Source.CampaignID != b.CampaignID || !s.ReadOnly || !revisionOK(s.Revision, false) || s.CreatedAt.IsZero() || s.UpdatedAt.IsZero() || len(s.Stages) < 1 || len(s.Stages) > 32 || len(g.Nodes) != len(s.Stages) || g.Edges == nil || g.ObservedAt.IsZero() || g.Consistency == "" || g.Completeness == "" || !analyticsCount(g.ParticipantCount) {
+		return false
+	}
+	stages := map[string]bool{}
+	for _, stage := range s.Stages {
+		if !integrationOAuthUUID(stage.ID) || stage.Name == "" || stages[stage.ID] {
+			return false
+		}
+		stages[stage.ID] = true
+	}
+	for _, stage := range b.Stages {
+		if !stages[stage.StageID] {
+			return false
+		}
+	}
+	nodes := map[string]bool{}
+	for _, node := range g.Nodes {
+		if !stages[node.StageID] || nodes[node.StageID] || !analyticsCount(node.UniqueSubjects) || !analyticsCount(node.Visits) || !analyticsCount(node.CurrentSubjects) {
+			return false
+		}
+		nodes[node.StageID] = true
+	}
+	edges := map[[2]string]bool{}
+	for _, edge := range g.Edges {
+		key := [2]string{edge.FromStageID, edge.ToStageID}
+		if !stages[edge.FromStageID] || !stages[edge.ToStageID] || edge.FromStageID == edge.ToStageID || edges[key] || !analyticsCount(edge.UniqueSubjects) {
+			return false
+		}
+		edges[key] = true
+	}
+	return true
+}
