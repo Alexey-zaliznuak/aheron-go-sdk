@@ -27,8 +27,6 @@ const (
 type AnalyticsCapabilities struct {
 	ContractRevision          string   `json:"contractRevision"`
 	StageContractRevision     string   `json:"stageContractRevision,omitempty"`
-	TemplateContractRevision  string   `json:"templateContractRevision,omitempty"`
-	SourceContractRevision    string   `json:"sourceContractRevision,omitempty"`
 	MaxStages                 int      `json:"maxStages,omitempty"`
 	DashboardContractRevision string   `json:"dashboardContractRevision"`
 	MaxDashboardPanels        int      `json:"maxDashboardPanels"`
