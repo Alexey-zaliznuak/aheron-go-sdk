@@ -831,3 +831,9 @@ Stage definitions include archived entries; all counters remain exact decimal
 strings. Missing binding stays an explicit API error. Binding experiment/stage-set
 IDs support direct links to the platform analytics graph. Requires the additive
 source summary endpoint in analytics-service (`analytics-sources/2` unchanged).
+
+`integration.CampaignClient.Catalog` reads the bounded campaign summary catalog
+through installation OAuth (`campaigns.read`). Pass CampaignCatalogOptions and
+continue with NextCursor even when Items is empty. Filters must remain unchanged
+between pages; UUID order is not creation order. Requires the campaign-service
+`/campaigns/page` endpoint; no fallback to an unbounded legacy list.
