@@ -15,30 +15,22 @@ safe to replay; other writes are not automatically replayed.
 
 ## Prepare the audience before sending
 
-Integrations that must record the entire audience before execution starts use
-`Prepare` instead of `Launch`. The campaign moves through `preparing` and
-`awaiting_audience`; no execution contexts are activated in either state. The
-existing `Launch` behavior is unchanged. `Prepare` has no fallback to `Launch`
-when the server does not support preparation.
+`Prepare` starts a revision-checked immutable audience snapshot. With campaign-service
+5bf2c16 and later, execution begins when the snapshot is durable: `snapshotting`
+then `running`, or `done` when empty. It never waits for analytics membership,
+ClickHouse, or an integration consumer. There is no fallback to `Launch` when
+an older server does not support the endpoint.
 
-Audience page and completion events for these campaigns include
-`preparationRequired: true`. After durably applying all unique audience members
-and the completion marker, the integration calls `StartPrepared` with
-`PreparedAudience`: the event's `CampaignCreatedAt` and completion marker's
-`ExpectedRecipients`. Completion may arrive before the last audience page, so
-check readiness after either event. A count of zero is valid for an empty audience.
+Older servers used `preparing` and `awaiting_audience` plus `StartPrepared`.
+The current worker resumes those stored states under the campaign lease while
+preserving batches, cursors, ownership and execution idempotency keys. Cancelled
+campaigns are never revived. Deploy this server change before removing any legacy
+consumer that used to acknowledge audience preparation.
 
-The server checks the immutable campaign identity, finished snapshot and exact
-recipient count before moving to `running` (or `done` for an empty audience).
-Repeating the same acknowledgement is safe, including after an uncertain response;
-it never revives a cancelled campaign. The integration must retain retryable work
-until this acknowledgement succeeds, for example by committing its consumer offset
-only after both the projection and `StartPrepared` have succeeded.
-
-Deploy the supporting campaign API and all audience consumers before enabling
-preparation for new launches. Older consumers ignore the optional event field and
-cannot release a prepared campaign. Events without this field retain their
-existing behavior and require no acknowledgement.
+`StartPrepared` remains a compatibility call: it checks the immutable identity,
+completed snapshot and exact count, and is safe to replay. New executionSnapshot
+campaigns reject it. Do not introduce a new dependency on this acknowledgement;
+new audience events have `preparationRequired: false`.
 
 Campaign metadata is a JSON object. The platform supplies the authoritative
 `campaignId` in execution metadata and separately in `ExecutionContext.CampaignID`.
@@ -73,8 +65,9 @@ Success here means platform API acceptance, not proof that the user read a messa
 
 No separate source-history or repair mechanism is introduced. Ordinary outbox
 retries and Kafka redelivery are supported; replay of external observations is
-bounded by Kafka retention once the source outbox has drained. The receiving
-integration retains its own accepted history.
+bounded by Kafka retention once the source outbox has drained. Campaign stage history belongs to analytics-service. Messenger legacy status
+projections and their history are retired; delivery receipts and explicit new
+stage observations remain operational.
 
 Run `task test:campaigns` for contract and OAuth boundary checks. Platform endpoints,
 OAuth audience configuration and corresponding service migrations must be deployed

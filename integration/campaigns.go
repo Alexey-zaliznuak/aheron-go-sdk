@@ -241,7 +241,8 @@ func (c *CampaignClient) Launch(ctx context.Context, projectID, id string, expec
 	return out, err
 }
 
-// Prepare resolves the full audience without activating any execution contexts.
+// Prepare starts a full audience snapshot; the current server releases execution
+// once that snapshot is durable, without waiting for analytics.
 // It requires a server supporting this endpoint; there is no fallback to Launch.
 func (c *CampaignClient) Prepare(ctx context.Context, projectID, id string, expectedRevision uint64) (Campaign, error) {
 	path, err := c.campaignPath(projectID, id)
@@ -256,7 +257,8 @@ func (c *CampaignClient) Prepare(ctx context.Context, projectID, id string, expe
 	return out, err
 }
 
-// StartPrepared releases a prepared campaign after its full audience is recorded.
+// StartPrepared acknowledges a legacy prepared campaign for compatibility.
+// Current campaign execution does not wait for this call.
 // Repeating the same acknowledgement is safe and never revives cancellation.
 func (c *CampaignClient) StartPrepared(ctx context.Context, projectID, id string, audience PreparedAudience) (Campaign, error) {
 	path, err := c.campaignPath(projectID, id)
