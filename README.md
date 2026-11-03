@@ -837,3 +837,5 @@ through installation OAuth (`campaigns.read`). Pass CampaignCatalogOptions and
 continue with NextCursor even when Items is empty. Filters must remain unchanged
 between pages; UUID order is not creation order. Requires the campaign-service
 `/campaigns/page` endpoint; no fallback to an unbounded legacy list.
+
+Installation clients can create ordinary stage sets (expectedRevision 0), read stage graphs and audience sizes. Apply records a subject command with the analytics.write grant and stable operationId.
