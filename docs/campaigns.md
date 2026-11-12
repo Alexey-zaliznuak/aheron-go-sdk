@@ -13,6 +13,27 @@ requires reloading before presenting a new action. Creation has a durable comman
 ledger that permits automatic write replay after a 401. `StartPrepared` is also
 safe to replay; other writes are not automatically replayed.
 
+## Schedule a one-time start
+
+`Schedule(ctx, projectID, campaignID, ScheduleCampaignParams)` schedules a draft
+or changes a scheduled campaign's start time. Supply `expectedRevision`, an
+absolute `scheduledAt` timestamp with zero seconds/fractions, and an IANA
+`timeZone` such as `Europe/Moscow`. The server checks future time and revision.
+This is authorization for future execution, not merely a draft update.
+`Unschedule(ctx, projectID, campaignID, expectedRevision)` returns a still-scheduled
+campaign to draft; it cannot rewind processing that has already started.
+`Cancel` also stops a scheduled campaign. Configuration changes require returning
+to draft first. Campaign and catalog responses expose `scheduledAt` and `timeZone`.
+
+The scheduled minute starts audience processing; it does not promise all message
+deliveries within that minute. Audience selection uses CRM data at processing time.
+Overdue campaigns resume after server recovery. Scheduling does not preserve a
+user session token. Both operations require installation OAuth `campaigns.write`
+and are not automatically retried. After an ambiguous response, call `Get` and
+compare the state and revision before deciding whether another write is needed.
+There is no fallback to immediate launch if scheduling is unavailable. Deploy the
+campaign-service scheduling migrations and API before integrating these methods.
+
 ## Prepare the audience before sending
 
 `Prepare` starts a revision-checked immutable audience snapshot. With campaign-service

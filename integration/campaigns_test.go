@@ -139,7 +139,7 @@ func TestCampaignOAuthScopesAndIsolation(t *testing.T) {
 }
 
 func TestCampaignOnlyCreationReplaysUnauthorizedWrite(t *testing.T) {
-	for _, operation := range []string{"create", "update", "launch", "cancel", "prepare", "start-prepared"} {
+	for _, operation := range []string{"create", "update", "launch", "cancel", "prepare", "start-prepared", "schedule", "unschedule"} {
 		t.Run(operation, func(t *testing.T) {
 			issues, calls := 0, 0
 			c := campaignOAuthFixture(t, func(w http.ResponseWriter, r *http.Request) {
@@ -167,6 +167,10 @@ func TestCampaignOnlyCreationReplaysUnauthorizedWrite(t *testing.T) {
 				_, _ = c.Campaigns.Cancel(ctx, crmOAuthProject, crmOAuthSubject)
 			case "prepare":
 				_, _ = c.Campaigns.Prepare(ctx, crmOAuthProject, crmOAuthSubject, 7)
+			case "schedule":
+				_, _ = c.Campaigns.Schedule(ctx, crmOAuthProject, crmOAuthSubject, ScheduleCampaignParams{ExpectedRevision: 7, ScheduledAt: time.Now().Add(time.Hour).Truncate(time.Minute), TimeZone: "UTC"})
+			case "unschedule":
+				_, _ = c.Campaigns.Unschedule(ctx, crmOAuthProject, crmOAuthSubject, 8)
 			case "start-prepared":
 				_, _ = c.Campaigns.StartPrepared(ctx, crmOAuthProject, crmOAuthSubject, PreparedAudience{CampaignCreatedAt: time.Now(), ExpectedRecipients: 100})
 			}

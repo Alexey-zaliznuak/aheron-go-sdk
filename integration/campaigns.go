@@ -43,6 +43,8 @@ type Campaign struct {
 	ProcessedCount     int             `json:"processedCount"`
 	Error              *string         `json:"error"`
 	CreatedAt          time.Time       `json:"createdAt"`
+	ScheduledAt        *time.Time      `json:"scheduledAt,omitempty"`
+	TimeZone           string          `json:"timeZone,omitempty"`
 	StartedAt          *time.Time      `json:"startedAt"`
 	SnapshotFinishedAt *time.Time      `json:"snapshotFinishedAt"`
 	FinishedAt         *time.Time      `json:"finishedAt"`
@@ -67,6 +69,15 @@ type UpdateCampaignParams struct {
 	Filter           *json.RawMessage `json:"filter,omitempty"`
 	RequiredFilter   *json.RawMessage `json:"requiredFilter,omitempty"`
 	Metadata         *json.RawMessage `json:"metadata,omitempty"`
+}
+
+// ScheduleCampaignParams schedules a draft or changes the time of a scheduled
+// campaign. ScheduledAt is an absolute instant at minute precision; the server
+// validates that it is in the future and TimeZone is an IANA time zone.
+type ScheduleCampaignParams struct {
+	ExpectedRevision uint64    `json:"expectedRevision"`
+	ScheduledAt      time.Time `json:"scheduledAt"`
+	TimeZone         string    `json:"timeZone"`
 }
 
 // PreparedAudience identifies the immutable audience whose initial state has
@@ -254,6 +265,34 @@ func (c *CampaignClient) Prepare(ctx context.Context, projectID, id string, expe
 	}{expectedRevision}
 	var out Campaign
 	err = callResourceJSON(ctx, c.write, c.baseURL, http.MethodPost, path+"/prepare", input, &out, false, 200, 202)
+	return out, err
+}
+
+// Schedule persists a one-time start time. This authorizes future execution,
+// unlike saving a draft. After an unknown result, read Get before another write;
+// this method does not automatically replay a request or fall back to Launch.
+func (c *CampaignClient) Schedule(ctx context.Context, projectID, id string, input ScheduleCampaignParams) (Campaign, error) {
+	path, err := c.campaignPath(projectID, id)
+	if err != nil {
+		return Campaign{}, err
+	}
+	var out Campaign
+	err = callResourceJSON(ctx, c.write, c.baseURL, http.MethodPost, path+"/schedule", input, &out, false, 200, 202)
+	return out, err
+}
+
+// Unschedule returns a scheduled campaign to draft using its current revision.
+// A conflict requires reading Get; an already started campaign cannot be reset.
+func (c *CampaignClient) Unschedule(ctx context.Context, projectID, id string, expectedRevision uint64) (Campaign, error) {
+	path, err := c.campaignPath(projectID, id)
+	if err != nil {
+		return Campaign{}, err
+	}
+	input := struct {
+		ExpectedRevision uint64 `json:"expectedRevision"`
+	}{expectedRevision}
+	var out Campaign
+	err = callResourceJSON(ctx, c.write, c.baseURL, http.MethodPost, path+"/unschedule", input, &out, false, 200)
 	return out, err
 }
 

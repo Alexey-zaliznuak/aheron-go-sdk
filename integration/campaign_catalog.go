@@ -14,13 +14,15 @@ type CampaignCatalogOptions struct {
 	Limit                int
 }
 type CampaignSummary struct {
-	ID            string    `json:"id"`
-	ProjectID     string    `json:"projectId"`
-	Name          string    `json:"name"`
-	Status        string    `json:"status"`
-	ActivationKey string    `json:"activationKey"`
-	Revision      string    `json:"revision"`
-	CreatedAt     time.Time `json:"createdAt"`
+	ID            string     `json:"id"`
+	ProjectID     string     `json:"projectId"`
+	Name          string     `json:"name"`
+	Status        string     `json:"status"`
+	ActivationKey string     `json:"activationKey"`
+	Revision      string     `json:"revision"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	ScheduledAt   *time.Time `json:"scheduledAt,omitempty"`
+	TimeZone      string     `json:"timeZone,omitempty"`
 }
 type CampaignCatalogPage struct {
 	Items        []CampaignSummary `json:"items"`
