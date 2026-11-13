@@ -841,4 +841,11 @@ between pages; UUID order is not creation order. Requires the campaign-service
 Installation clients can create ordinary stage sets (expectedRevision 0), read stage graphs and audience sizes. Apply records a subject command with the analytics.write grant and stable operationId.
 
 ## Declarative billing quotas
-integration.Manifest.Quotas accepts []integration.Quota with SystemName, Name, UnitName, BillingStep. Catalog.Sync sends declarations over existing application OAuth. No billing secrets belong in integrations. Identity is assigned by the gateway. Omitted quotas are retained; unit/step cannot be changed after registration. Retry an identical manifest after an unknown result. This catalog-only capability does not charge projects. Publish a new SDK version before integrations adopt this field; no integration dependency was changed in this task.
+integration.Manifest.Quotas accepts []integration.Quota with optional ID, SystemName, Name, UnitName, BillingStep and PurchasePriceMinor (*int64, RUB kopecks for the entire purchase step). Catalog.Sync sends declarations over existing application OAuth. No billing secrets belong in integrations. Owner identity is assigned by the gateway; quota ID is permanent. Omitted quotas are retained; display units and purchase steps can be updated without rescaling existing plan quantities. Retry an identical manifest after an unknown result. This catalog-only capability does not charge projects. Publish a new SDK version before integrations adopt this field; no integration dependency was changed in this task.
+
+`client.Catalog.Quota(ctx, id)` and `client.Catalog.QuotaByName(ctx, systemName)`
+read this integration's quota through application OAuth. Send the returned ID
+in a later declaration to rename it without changing its identity. Old names
+stop resolving; a declaration with a new name and no ID creates another quota.
+Price nil means unconfigured, zero means free; all prices are RUB with no currency
+field. Metadata/price edits never rescale quantities or initiate purchases.

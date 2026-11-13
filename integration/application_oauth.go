@@ -41,8 +41,9 @@ func newApplicationOAuth(baseURL, audience string, cfg *ApplicationOAuthConfig) 
 }
 
 func (c *applicationOAuth) call(ctx context.Context, method, path string, body []byte, out any) error {
+	quotaRead := method == http.MethodGet && strings.HasPrefix(path, "/integrations/self/quotas?")
 	callbacksPrefix := "/integrations/self/link-callbacks/"
-	if !(c.audience == "catalog" && method == http.MethodPost && path == selfSyncPath || c.audience == "links" && method == http.MethodPut && strings.HasPrefix(path, callbacksPrefix) && applicationEndpointKey.MatchString(strings.TrimPrefix(path, callbacksPrefix))) {
+	if !(c.audience == "catalog" && (method == http.MethodPost && path == selfSyncPath || quotaRead) || c.audience == "links" && method == http.MethodPut && strings.HasPrefix(path, callbacksPrefix) && applicationEndpointKey.MatchString(strings.TrimPrefix(path, callbacksPrefix))) {
 		return integrationoauth.ErrRequest
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))

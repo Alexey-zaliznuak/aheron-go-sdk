@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/logx"
@@ -27,7 +29,7 @@ type CatalogClient struct {
 // SyncResult reports what the platform did with the manifest.
 //
 // Changed is false when the manifest already matched the published version, in
-// which case nothing was written — this is the normal outcome of a restart.
+// while independent quota declarations and integration metadata may still update.
 //
 // Published is false when the platform prepared a draft but could not publish
 // it, and Reason says why. The only case today is a subflow block whose
@@ -47,7 +49,7 @@ type SyncResult struct {
 // cleared.
 //
 // The call is idempotent. When the manifest matches the published version the
-// platform writes nothing and returns Changed=false, so calling it on every
+// platform returns Changed=false for the block version, so calling it on every
 // start of every replica is safe and converges: replicas racing to publish the
 // same manifest end up with a single new version.
 //
@@ -173,4 +175,36 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	case <-ctx.Done():
 		return false
 	}
+}
+
+// QuotaDefinition is the current declaration with its immutable platform identity.
+type QuotaDefinition struct {
+	Quota
+	OwnerKey string `json:"ownerKey"`
+	Kind     string `json:"kind"`
+	Revision int64  `json:"revision"`
+}
+
+// Quota reads this integration's quota by immutable ID.
+func (c *CatalogClient) Quota(ctx context.Context, id string) (QuotaDefinition, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return QuotaDefinition{}, fmt.Errorf("integration: invalid quota ID")
+	}
+	return c.readQuota(ctx, "id", id)
+}
+
+// QuotaByName resolves this integration's current name; old names stop resolving after rename.
+func (c *CatalogClient) QuotaByName(ctx context.Context, name string) (QuotaDefinition, error) {
+	if name == "" {
+		return QuotaDefinition{}, fmt.Errorf("integration: quota name required")
+	}
+	return c.readQuota(ctx, "systemName", name)
+}
+func (c *CatalogClient) readQuota(ctx context.Context, key, value string) (QuotaDefinition, error) {
+	var out QuotaDefinition
+	if c.oauth == nil {
+		return out, fmt.Errorf("integration: application OAuth is required for quota lookup")
+	}
+	err := c.oauth.call(ctx, http.MethodGet, "/integrations/self/quotas?"+url.Values{key: {value}}.Encode(), nil, &out)
+	return out, err
 }

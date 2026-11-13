@@ -17,6 +17,7 @@ package integration
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
 	"io/fs"
 	"path"
 	"strings"
@@ -136,10 +137,13 @@ type Icon struct {
 // A zero path means "this integration does not offer that endpoint".
 // Quota declares a stable counter; omitted declarations are retained by billing.
 type Quota struct {
-	SystemName  string `json:"systemName"`
-	Name        string `json:"name"`
-	UnitName    string `json:"unitName"`
-	BillingStep int64  `json:"billingStep"`
+	ID string `json:"id,omitempty"`
+	// PurchasePriceMinor is RUB kopecks per billingStep; nil means not configured.
+	PurchasePriceMinor *int64 `json:"purchasePriceMinor"`
+	SystemName         string `json:"systemName"`
+	Name               string `json:"name"`
+	UnitName           string `json:"unitName"`
+	BillingStep        int64  `json:"billingStep"`
 }
 type Manifest struct {
 	Quotas []Quota
@@ -254,6 +258,16 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 			return manifestBody{}, fmt.Errorf("integration: invalid or duplicate quota declaration")
 		}
 		seenQuotas[q.SystemName] = true
+		if q.ID != "" {
+			if _, err := uuid.Parse(q.ID); err != nil || seenQuotas["id:"+q.ID] {
+				return manifestBody{}, fmt.Errorf("integration: invalid or duplicate quota ID or price")
+			}
+			seenQuotas["id:"+q.ID] = true
+		}
+		if q.PurchasePriceMinor != nil && (*q.PurchasePriceMinor < 0 || *q.PurchasePriceMinor > 9007199254740991) {
+			return manifestBody{}, fmt.Errorf("integration: invalid or duplicate quota ID or price")
+		}
+
 	}
 	base := strings.TrimRight(baseURL, "/")
 
