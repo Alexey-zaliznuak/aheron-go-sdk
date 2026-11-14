@@ -896,3 +896,15 @@ with up to six fractional digits. These methods do not read balances, usage or
 subscriptions and offer no mutations.
 
 Quota description is optional plain text (up to 2000 characters). Omitted/empty clears it; legacy rows read as empty. Integration descriptions are updated by declaration only; admin can view them. Roll out billing migration 00010/runtime and backend before integrations using description.
+
+### Project billing
+Billing.Accounts/Project read the user's accounts or authorized project subscription;
+these reads can initialize a missing primary account/free subscription. CreateAccount
+requires a random UUID v4 and starts at zero balance. UpdateAccount renames/pauses an
+own account; no client balance adjustment or top-up method exists. AttachAccount
+requires project management and ownership of the payer, preserving the paid period.
+ChangePlan charges a full new 30-day period immediately; pass a stable operationId
+and revision, retry the identical body only. Project quotas use exact decimal strings;
+purchased reserves survive resets. Public user access JWT only. Requires enabled
+project billing (migration 22 plus auth/backend directories); catalog-only deployments
+return 404 for these new routes. No assistant financial tools are added by this SDK.
