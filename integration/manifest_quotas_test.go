@@ -11,7 +11,7 @@ import (
 )
 
 func TestManifestQuotaDeclarations(t *testing.T) {
-	m := Manifest{Quotas: []Quota{{SystemName: "runs", Name: "Runs", UnitName: "Executions", BillingStep: 1000}}}
+	m := Manifest{Quotas: []Quota{{SystemName: "execution.runs", Name: "Runs", UnitName: "Executions", BillingStep: 1000}}}
 	body, err := m.resolve("https://example.com")
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestCatalogQuotaLookupByIDAndName(t *testing.T) {
 		if r.Method != "GET" || r.URL.Path != "/api/integrations/self/quotas" {
 			t.Errorf("unexpected lookup %s %s", r.Method, r.URL.String())
 		}
-		if calls == 1 && r.URL.Query().Get("id") != id || calls == 2 && r.URL.Query().Get("systemName") != "runs" {
+		if calls == 1 && r.URL.Query().Get("id") != id || calls == 2 && r.URL.Query().Get("systemName") != "execution.runs" {
 			t.Error("lookup selector missing")
 		}
 		_, _ = w.Write([]byte(`{"id":"` + id + `","systemName":"runs","purchasePriceMinor":12345}`))
@@ -57,7 +57,7 @@ func TestCatalogQuotaLookupByIDAndName(t *testing.T) {
 	if err != nil || q.ID != id || q.PurchasePriceMinor == nil || *q.PurchasePriceMinor != 12345 {
 		t.Fatalf("lookup %+v %v", q, err)
 	}
-	q, err = client.Catalog.QuotaByName(context.Background(), "runs")
+	q, err = client.Catalog.QuotaByName(context.Background(), "execution.runs")
 	if err != nil || q.ID != id {
 		t.Fatalf("name lookup %+v %v", q, err)
 	}

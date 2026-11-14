@@ -77,6 +77,7 @@ type Client struct {
 	Files            *FilesClient
 	Integrations     *IntegrationsClient
 	Analytics        *AnalyticsClient
+	Billing          *BillingClient
 }
 
 func New(cfg Config) (*Client, error) {
@@ -150,6 +151,7 @@ func (c *Client) bindResources() {
 	c.Files = &FilesClient{client: c}
 	c.Integrations = &IntegrationsClient{client: c}
 	c.Analytics = &AnalyticsClient{client: c}
+	c.Billing = &BillingClient{client: c}
 }
 
 // get intentionally performs one request. Credential refresh is explicit in

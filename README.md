@@ -863,9 +863,9 @@ normal removal semantics. Quotas are the exception: omitted quotas are retained.
 
 `Catalog.Sync` sends declarations over existing application OAuth. No billing
 secrets belong in integrations. The gateway assigns the authenticated integration
-as owner; billing creates `kind=integration` quotas, read-only in the admin panel
+as owner; billing creates `kind=integration` quotas, with read-only metadata in the admin panel
 and available for inclusion in plans. Names are unique within that owner and must
-match `[a-z][a-z0-9-]{0,99}`. Name and unit label are required (up to 200 characters).
+match `[a-z][a-z0-9.-]{0,99}`. Name and unit label are required (up to 200 characters).
 Declare at most 500 quotas per manifest. The purchase step is a positive integer;
 it does not determine consumption precision (quantities support 0.000001).
 
@@ -881,3 +881,16 @@ in a later declaration to rename it without changing its identity. Old names
 stop resolving; a declaration with a new name and no ID creates another quota.
 Price nil means unconfigured, zero means free; all prices are RUB with no currency
 field. Metadata/price edits never rescale quantities or initiate purchases.
+
+Administrators may delete either quota kind with all plan allocations. Remove a
+deleted integration quota from its manifest too, or the next sync recreates it
+without restoring allocations.
+
+## User billing catalog
+The common facade exposes client.Billing.Plans(ctx) and
+client.Billing.Quotas(ctx, integrationID). An empty integrationID selects system
+quotas; a UUID selects that integration. Both use the current user access token
+against GET /api/billing/plans and GET /api/billing/quotas. Plans exclude hidden
+entries. All money is integer RUB kopecks; includedUnits is an exact decimal string
+with up to six fractional digits. These methods do not read balances, usage or
+subscriptions and offer no mutations.
