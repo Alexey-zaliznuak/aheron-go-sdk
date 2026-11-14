@@ -129,12 +129,6 @@ type Icon struct {
 	Content []byte
 }
 
-// Manifest is the full desired state of the integration's catalog entry: the
-// version contract plus the block set. It is declarative — whatever it omits is
-// cleared in the catalog, and whatever it declares replaces what is there.
-// Quotas are additive declarations: omissions retain previously registered quotas.
-//
-// A zero path means "this integration does not offer that endpoint".
 // Quota declares a stable counter; omitted declarations are retained by billing.
 type Quota struct {
 	ID string `json:"id,omitempty"`
@@ -145,6 +139,13 @@ type Quota struct {
 	UnitName           string `json:"unitName"`
 	BillingStep        int64  `json:"billingStep"`
 }
+
+// Manifest is the full desired state of the integration's catalog entry: the
+// version contract plus the block set. It is declarative — whatever it omits is
+// cleared in the catalog, and whatever it declares replaces what is there.
+// Quotas are additive declarations: omissions retain previously registered quotas.
+//
+// A zero path means "this integration does not offer that endpoint".
 type Manifest struct {
 	Quotas []Quota
 

@@ -841,7 +841,39 @@ between pages; UUID order is not creation order. Requires the campaign-service
 Installation clients can create ordinary stage sets (expectedRevision 0), read stage graphs and audience sizes. Apply records a subject command with the analytics.write grant and stable operationId.
 
 ## Declarative billing quotas
-integration.Manifest.Quotas accepts []integration.Quota with optional ID, SystemName, Name, UnitName, BillingStep and PurchasePriceMinor (*int64, RUB kopecks for the entire purchase step). Catalog.Sync sends declarations over existing application OAuth. No billing secrets belong in integrations. Owner identity is assigned by the gateway; quota ID is permanent. Omitted quotas are retained; display units and purchase steps can be updated without rescaling existing plan quantities. Retry an identical manifest after an unknown result. This catalog-only capability does not charge projects. Publish a new SDK version before integrations adopt this field; no integration dependency was changed in this task.
+Add `Quotas` to the integration's existing `integration.Manifest`; keep its blocks,
+endpoints and other declarations. For example, a package of 1,000 operations for
+250 RUB:
+
+```go
+priceMinor := int64(25000) // 250 RUB in kopecks, for the whole package.
+manifest.Quotas = []integration.Quota{{
+    SystemName:         "operations",
+    Name:               "Операции интеграции",
+    UnitName:           "Операций",
+    BillingStep:        1000,
+    PurchasePriceMinor: &priceMinor,
+}}
+result, err := client.Catalog.Sync(ctx, manifest)
+```
+
+The existing `Catalog.StartSync` startup path also publishes these declarations.
+Do not sync a separate quota-only manifest: omitted blocks/endpoints have the
+normal removal semantics. Quotas are the exception: omitted quotas are retained.
+
+`Catalog.Sync` sends declarations over existing application OAuth. No billing
+secrets belong in integrations. The gateway assigns the authenticated integration
+as owner; billing creates `kind=integration` quotas, read-only in the admin panel
+and available for inclusion in plans. Names are unique within that owner and must
+match `[a-z][a-z0-9-]{0,99}`. Name and unit label are required (up to 200 characters).
+Declare at most 500 quotas per manifest. The purchase step is a positive integer;
+it does not determine consumption precision (quantities support 0.000001).
+
+Registration is idempotent and independent of block versions: `Changed=false`
+does not mean the quota declarations were skipped. Catalog publication and billing
+registration use separate transactions. Retry the identical manifest after a
+failure or unknown result; an already published block version is safe to retry.
+This catalog-only capability does not charge projects.
 
 `client.Catalog.Quota(ctx, id)` and `client.Catalog.QuotaByName(ctx, systemName)`
 read this integration's quota through application OAuth. Send the returned ID
