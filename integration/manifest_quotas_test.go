@@ -11,7 +11,7 @@ import (
 )
 
 func TestManifestQuotaDeclarations(t *testing.T) {
-	m := Manifest{Quotas: []Quota{{SystemName: "execution.runs", Name: "Runs", UnitName: "Executions", BillingStep: 1000}}}
+	m := Manifest{Quotas: []Quota{{SystemName: "execution.runs", Description: "Описание квоты", Name: "Runs", UnitName: "Executions", BillingStep: 1000}}}
 	body, err := m.resolve("https://example.com")
 	if err != nil {
 		t.Fatal(err)
@@ -23,7 +23,7 @@ func TestManifestQuotaDeclarations(t *testing.T) {
 	var wire struct {
 		Quotas []Quota `json:"quotas"`
 	}
-	if err = json.Unmarshal(data, &wire); err != nil || len(wire.Quotas) != 1 || wire.Quotas[0].BillingStep != 1000 {
+	if err = json.Unmarshal(data, &wire); err != nil || len(wire.Quotas) != 1 || wire.Quotas[0].BillingStep != 1000 || wire.Quotas[0].Description != "Описание квоты" {
 		t.Fatalf("wire %s %v", data, err)
 	}
 	m.Quotas = append(m.Quotas, m.Quotas[0])

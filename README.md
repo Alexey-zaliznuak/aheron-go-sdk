@@ -894,3 +894,5 @@ against GET /api/billing/plans and GET /api/billing/quotas. Plans exclude hidden
 entries. All money is integer RUB kopecks; includedUnits is an exact decimal string
 with up to six fractional digits. These methods do not read balances, usage or
 subscriptions and offer no mutations.
+
+Quota description is optional plain text (up to 2000 characters). Omitted/empty clears it; legacy rows read as empty. Integration descriptions are updated by declaration only; admin can view them. Roll out billing migration 00010/runtime and backend before integrations using description.

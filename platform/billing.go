@@ -10,6 +10,7 @@ import (
 type BillingClient struct{ client *Client }
 
 type BillingQuota struct {
+	Description        string  `json:"description,omitempty"`
 	ID                 string  `json:"id"`
 	IntegrationID      *string `json:"integrationId"`
 	SystemName         string  `json:"systemName"`

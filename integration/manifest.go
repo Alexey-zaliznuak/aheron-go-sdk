@@ -131,7 +131,8 @@ type Icon struct {
 
 // Quota declares a stable counter; omitted declarations are retained by billing.
 type Quota struct {
-	ID string `json:"id,omitempty"`
+	Description string `json:"description,omitempty"`
+	ID          string `json:"id,omitempty"`
 	// PurchasePriceMinor is RUB kopecks per billingStep; nil means not configured.
 	PurchasePriceMinor *int64 `json:"purchasePriceMinor"`
 	SystemName         string `json:"systemName"`
@@ -255,7 +256,7 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 	}
 	seenQuotas := map[string]bool{}
 	for _, q := range m.Quotas {
-		if seenQuotas[q.SystemName] || q.SystemName == "" || strings.TrimSpace(q.Name) == "" || strings.TrimSpace(q.UnitName) == "" || q.BillingStep < 1 || q.BillingStep > 9007199254740991 {
+		if len([]rune(q.Description)) > 2000 || seenQuotas[q.SystemName] || q.SystemName == "" || strings.TrimSpace(q.Name) == "" || strings.TrimSpace(q.UnitName) == "" || q.BillingStep < 1 || q.BillingStep > 9007199254740991 {
 			return manifestBody{}, fmt.Errorf("integration: invalid or duplicate quota declaration")
 		}
 		seenQuotas[q.SystemName] = true
