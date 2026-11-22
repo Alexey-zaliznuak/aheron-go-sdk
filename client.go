@@ -38,6 +38,8 @@ type Client struct {
 	Documentation *platform.DocumentationClient
 	Analytics     *platform.AnalyticsClient
 	Billing       *platform.BillingClient
+	// NamedTriggers is available when New is configured with a ProjectAPIKey.
+	NamedTriggers *platform.NamedTriggersClient
 }
 
 func New(cfg Config) (*Client, error) {
@@ -65,6 +67,15 @@ func New(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	var namedTriggers *platform.NamedTriggersClient
+	if cfg.ProjectAPIKey != "" {
+		triggerConfig := pc
+		triggerConfig.TokenProvider = nil
+		namedTriggers, err = platform.NewNamedTriggers(triggerConfig, cfg.ProjectAPIKey)
+		if err != nil {
+			return nil, err
+		}
+	}
 	ic := integration.Config{APIKey: cfg.ProjectAPIKey, CRMOAuth: cfg.CRMOAuth, CRMURL: cfg.CRMURL, Timeout: cfg.Timeout, DisableTimeout: cfg.DisableTimeout}
 	if cfg.UserTokenProvider != nil {
 		ic.CRMUser = &pc
@@ -79,5 +90,5 @@ func New(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{Projects: p.Projects, Schemes: p.Schemes, Files: p.Files, CRM: i.CRM, Integrations: p.Integrations, Documentation: documentation, Analytics: p.Analytics, Billing: p.Billing}, nil
+	return &Client{Projects: p.Projects, Schemes: p.Schemes, Files: p.Files, CRM: i.CRM, Integrations: p.Integrations, Documentation: documentation, Analytics: p.Analytics, Billing: p.Billing, NamedTriggers: namedTriggers}, nil
 }

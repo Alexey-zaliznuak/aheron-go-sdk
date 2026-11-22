@@ -71,6 +71,7 @@ type Client struct {
 	base             *url.URL
 	http             *http.Client
 	provider         TokenProvider
+	projectAPIKey    string
 	maxResponseBytes int64
 	Projects         *ProjectsClient
 	Schemes          *SchemesClient
@@ -81,13 +82,25 @@ type Client struct {
 }
 
 func New(cfg Config) (*Client, error) {
+	if cfg.TokenProvider == nil {
+		return nil, ErrConfig
+	}
+	c, err := newClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+	c.bindResources()
+	return c, nil
+}
+
+func newClient(cfg Config) (*Client, error) {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = DefaultBaseURL
 	}
 	u, err := url.Parse(cfg.BaseURL)
 	if err != nil || u.Hostname() == "" || u.User != nil || u.Opaque != "" ||
 		u.RawQuery != "" || u.ForceQuery || strings.Contains(cfg.BaseURL, "#") ||
-		u.RawPath != "" || strings.Contains(u.Path, "\\") || cfg.TokenProvider == nil {
+		u.RawPath != "" || strings.Contains(u.Path, "\\") {
 		return nil, ErrConfig
 	}
 	if u.Scheme != "https" && !(u.Scheme == "http" && cfg.AllowLoopbackHTTP && loopback(u.Hostname())) {
@@ -121,7 +134,6 @@ func New(cfg Config) (*Client, error) {
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	u.Path = strings.TrimRight(u.Path, "/")
 	c := &Client{base: u, http: &client, provider: cfg.TokenProvider, maxResponseBytes: cfg.MaxResponseBytes}
-	c.bindResources()
 	return c, nil
 }
 
@@ -178,25 +190,13 @@ func (c *Client) Do(ctx context.Context, input *http.Request) (*http.Response, e
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	token, err := c.provider.Token(ctx)
+	bearer, err := c.bearer(ctx)
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if errors.Is(err, ErrTokenExpired) {
-			return nil, ErrTokenExpired
-		}
-		return nil, ErrCredential // Providers can include secrets in their errors.
-	}
-	if _, err := NewAccessToken(token.value, token.expiresAt); err != nil {
 		return nil, err
-	}
-	if !token.expiresAt.IsZero() && !time.Now().Before(token.expiresAt) {
-		return nil, ErrTokenExpired
 	}
 	req := input.Clone(ctx)
 	req.Header.Del("Cookie")
-	req.Header.Set("Authorization", "Bearer "+token.value)
+	req.Header.Set("Authorization", "Bearer "+bearer)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -205,4 +205,27 @@ func (c *Client) Do(ctx context.Context, input *http.Request) (*http.Response, e
 		return nil, ErrTransport // Do not expose URL/transport error details.
 	}
 	return resp, nil
+}
+
+func (c *Client) bearer(ctx context.Context) (string, error) {
+	if c.projectAPIKey != "" {
+		return c.projectAPIKey, nil
+	}
+	token, err := c.provider.Token(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		if errors.Is(err, ErrTokenExpired) {
+			return "", ErrTokenExpired
+		}
+		return "", ErrCredential // Providers can include secrets in their errors.
+	}
+	if _, err := NewAccessToken(token.value, token.expiresAt); err != nil {
+		return "", err
+	}
+	if !token.expiresAt.IsZero() && !time.Now().Before(token.expiresAt) {
+		return "", ErrTokenExpired
+	}
+	return token.value, nil
 }

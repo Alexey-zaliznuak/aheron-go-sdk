@@ -12,6 +12,14 @@ integration OAuth. Методы CRM не дублируются. `platform` со
 `Schemes.GetGraph` читает шаги, настройки, ветки и связи сохранённого графа одной
 ревизии; `Schemes.GetStep` — полное содержимое отдельного шага с правами пользователя.
 [Контракт и примеры](docs/user-api.md).
+
+`Client.NamedTriggers.Activate` запускает именованный триггер, если клиент
+создан с `aheron.Config{ProjectAPIKey: ...}`. В
+`platform.NamedTriggerActivation` передайте `ActivationKey`, `SubjectID` и при
+необходимости `Payload` типа `json.RawMessage`. Значение `nil` пропускает поле,
+а `json.RawMessage("null")` отправляет JSON null. Метод возвращает идентификаторы
+принятых контекстов и не ожидает завершения сценария.
+
 `Client.Analytics` предоставляет каталог папок/счётчиков/аудиторий/разбиений,
 версионные дашборды, временные ряды, текущие значения и атомарные команды.
 Используется пользовательский JWT и база `BaseURL + /analytics`; внутренние
