@@ -22,8 +22,8 @@ import (
 // Open connects to YDB.
 //
 // serviceAccountKeyFile is the authorized key of the service account the caller
-// runs as. An empty path means an anonymous connection, which is what a local
-// docker cluster expects.
+// runs as. With an empty path the driver uses native credentials from the
+// TLS DSN or connects anonymously to the local emulator.
 //
 // Authorizing by a service account key is Yandex-Cloud-specific and lives
 // outside the core driver, in ydb-go-yc. WithInternalCA comes with it and is
