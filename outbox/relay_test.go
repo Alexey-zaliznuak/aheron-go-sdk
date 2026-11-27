@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -316,6 +317,101 @@ func TestRelayDrainsEveryOwnedBucket(t *testing.T) {
 			t.Fatalf("bucket %d still holds %d rows", bucket, n)
 		}
 	}
+}
+
+type gatedBatch struct {
+	bucket  int
+	release chan struct{}
+}
+
+type gatedBatchesStore struct {
+	Store
+	started chan gatedBatch
+}
+
+func (s gatedBatchesStore) PublishBucket(ctx context.Context, bucket int, owner string, limit int, publish func(context.Context, Event) error) (int, error) {
+	batch := gatedBatch{bucket: bucket, release: make(chan struct{})}
+	s.started <- batch
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	case <-batch.release:
+		return s.Store.PublishBucket(ctx, bucket, owner, limit, publish)
+	}
+}
+
+func TestRelayLimitsConcurrentBatches(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		buckets := []int{0, 1, 2, 3}
+		pending := newFakeStore(buckets...)
+		store := gatedBatchesStore{Store: pending, started: make(chan gatedBatch, len(buckets))}
+		relay := NewRelayWithOptions(store, newRecorder(), Config{}, WithMaxConcurrentBatches(2))
+		grantLocalLease(t, relay, buckets...)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			relay.drain(t.Context())
+		}()
+
+		seen := make(map[int]bool, len(buckets))
+		for range 2 {
+			synctest.Wait()
+			if n := len(store.started); n != 2 {
+				relay.stopLease()
+				t.Fatalf("started %d batches, want 2", n)
+			}
+			var running []gatedBatch
+			for range 2 {
+				batch := <-store.started
+				running = append(running, batch)
+				seen[batch.bucket] = true
+			}
+			for _, batch := range running {
+				close(batch.release)
+			}
+		}
+		<-done
+		if len(seen) != len(buckets) {
+			t.Fatalf("relay did not visit all buckets: %v", seen)
+		}
+	})
+}
+
+func TestRelayYieldAndLeaseCancellationWithBatchLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		pending := newFakeStore(0, 1)
+		pending.enqueue(0, "hot-1", "hot-2")
+		pending.enqueue(1, "cold-1")
+		store := gatedBatchesStore{Store: pending, started: make(chan gatedBatch, 4)}
+		relay := NewRelayWithOptions(store, newRecorder(), Config{BatchSize: 1}, WithMaxConcurrentBatches(1))
+		grantLocalLease(t, relay, 0, 1)
+
+		done := make(chan int, 2)
+		go func() { done <- relay.drainBucket(t.Context(), 0) }()
+		first := <-store.started
+		go func() { done <- relay.drainBucket(t.Context(), 1) }()
+		synctest.Wait()
+		if len(store.started) != 0 {
+			relay.stopLease()
+			t.Fatal("cold bucket bypassed the batch limit")
+		}
+		close(first.release)
+		second := <-store.started
+		if second.bucket != 1 {
+			relay.stopLease()
+			t.Fatalf("hot bucket retained the slot between batches: got bucket %d", second.bucket)
+		}
+		// The hot bucket now waits for another slot. Both workers must return
+		// on lease loss, and the queued batch must not enter PublishBucket.
+		synctest.Wait()
+		relay.stopLease()
+		if published := <-done + <-done; published != 1 || len(store.started) != 0 {
+			t.Fatalf("work crossed an expired lease: published=%d extra=%d", published, len(store.started))
+		}
+		if pending.remaining(0) != 1 || pending.remaining(1) != 1 {
+			t.Fatal("unpublished rows were removed on lease loss")
+		}
+	})
 }
 
 func TestRelayKeepsOrderWithinBucket(t *testing.T) {

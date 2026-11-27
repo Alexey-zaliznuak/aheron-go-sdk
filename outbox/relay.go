@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/internal/logx"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -58,10 +59,21 @@ type Config struct {
 type RelayOption func(*relayOptions)
 
 type relayOptions struct {
-	backoffMin    time.Duration
-	backoffMax    time.Duration
-	observer      Observer
-	observerQueue int
+	backoffMin           time.Duration
+	backoffMax           time.Duration
+	observer             Observer
+	observerQueue        int
+	maxConcurrentBatches int
+}
+
+// WithMaxConcurrentBatches limits simultaneous PublishBucket calls per relay.
+// Each full bucket releases its slot between batches so other buckets can
+// make progress. A non-positive limit keeps the default of one slot per owned
+// bucket.
+func WithMaxConcurrentBatches(limit int) RelayOption {
+	return func(options *relayOptions) {
+		options.maxConcurrentBatches = limit
+	}
 }
 
 // WithRetryBackoff changes the exponential full-jitter bounds. Non-positive
@@ -122,6 +134,7 @@ type Relay struct {
 	observer   *asyncObserver
 	backoffMin time.Duration
 	backoffMax time.Duration
+	batchSlots *semaphore.Weighted
 
 	mu           sync.RWMutex
 	owned        []int
@@ -190,6 +203,10 @@ func NewRelayWithOptions(store Store, publisher Publisher, cfg Config, options .
 	if opts.observer != nil {
 		observer = newAsyncObserver(opts.observer, opts.observerQueue)
 	}
+	var batchSlots *semaphore.Weighted
+	if opts.maxConcurrentBatches > 0 {
+		batchSlots = semaphore.NewWeighted(int64(opts.maxConcurrentBatches))
+	}
 
 	return &Relay{
 		store:      store,
@@ -202,6 +219,7 @@ func NewRelayWithOptions(store Store, publisher Publisher, cfg Config, options .
 		observer:   observer,
 		backoffMin: opts.backoffMin,
 		backoffMax: opts.backoffMax,
+		batchSlots: batchSlots,
 		retries:    make(map[int]bucketRetry),
 		now:        time.Now,
 		jitter:     fullJitter,
@@ -434,10 +452,9 @@ func (r *Relay) bucketLease(bucket int) (context.Context, bool) {
 	return r.leaseCtx, true
 }
 
-// drain publishes the backlog of every owned bucket. Buckets are independent —
-// a partition key maps to exactly one of them — so they are drained in
-// parallel, one goroutine each. Within a bucket the order is strictly
-// sequential, which is what keeps one key's events in the order they happened.
+// drain runs one loop per owned bucket. Batches from independent buckets can
+// run concurrently, limited by batchSlots when configured. Each bucket runs
+// its own batches sequentially to preserve partition-key order.
 func (r *Relay) drain(ctx context.Context) {
 	r.mu.RLock()
 	owned := append([]int(nil), r.owned...)
@@ -494,10 +511,10 @@ func (r *Relay) drainBucket(ctx context.Context, bucket int) int {
 
 	published := 0
 	for {
-		n, err := r.store.PublishBucket(publishCtx, bucket, r.owner, r.batchSize, r.publish)
+		n, err := r.publishBatch(publishCtx, leaseCtx, bucket)
 		published += n
 		if err != nil {
-			if publishCtx.Err() != nil {
+			if publishCtx.Err() != nil || leaseCtx.Err() != nil {
 				return published
 			}
 
@@ -537,6 +554,21 @@ func (r *Relay) drainBucket(ctx context.Context, bucket int) int {
 			return published
 		}
 	}
+}
+
+func (r *Relay) publishBatch(ctx, leaseCtx context.Context, bucket int) (int, error) {
+	if r.batchSlots != nil {
+		if err := r.batchSlots.Acquire(ctx, 1); err != nil {
+			return 0, err
+		}
+		defer r.batchSlots.Release(1)
+		// Lease cancellation is forwarded to ctx by AfterFunc. Check the
+		// lease directly in case its callback has not run after this wait.
+		if err := leaseCtx.Err(); err != nil {
+			return 0, err
+		}
+	}
+	return r.store.PublishBucket(ctx, bucket, r.owner, r.batchSize, r.publish)
 }
 
 func (r *Relay) publish(ctx context.Context, ev Event) error {
