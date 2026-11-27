@@ -930,3 +930,10 @@ and revision, retry the identical body only. Project quotas use exact decimal st
 purchased reserves survive resets. Public user access JWT only. Requires enabled
 project billing (migration 22 plus auth/backend directories); catalog-only deployments
 return 404 for these new routes. No assistant financial tools are added by this SDK.
+# Проверка ключа проекта
+
+`projectkey.NewVerifier` подключается к внутреннему auth-service с отдельным
+`PROJECT_KEY_LOOKUP_TOKEN`. `Verify` возвращает UUID проекта для действующего
+ключа и проверяет актуальность ключа при каждом вызове. Проверка скоупов
+остаётся ответственностью API, который принимает ключ.
+
