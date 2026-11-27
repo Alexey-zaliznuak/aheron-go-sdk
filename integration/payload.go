@@ -2,6 +2,13 @@ package integration
 
 import "encoding/json"
 
+const (
+	// TrafficClassBulk identifies background work such as campaign delivery.
+	TrafficClassBulk = "bulk"
+	// TrafficClassInteractive identifies work driven by a live interaction.
+	TrafficClassInteractive = "interactive"
+)
+
 // This file defines the typed values the platform embeds in the requests it
 // sends to an integration backend. Unlike earlier versions of the SDK, the
 // action request body is NOT a fixed envelope: the integration author designs it
@@ -37,8 +44,14 @@ type ExecutionContext struct {
 	BranchID  string  `json:"branchId,omitempty"`
 	StepID    string  `json:"stepId,omitempty"`
 	// CampaignID is server-authored origin, independent from mutable metadata.
-	CampaignID string          `json:"campaignId,omitempty"`
-	Metadata   json.RawMessage `json:"metadata,omitempty"`
+	CampaignID string `json:"campaignId,omitempty"`
+	// TrafficClass is the server-assigned class of the action. Older execution
+	// versions may omit it. Persist it with automatic follow-ups and retries.
+	TrafficClass string `json:"trafficClass,omitempty"`
+	// ExecutionRunID identifies the activation that started this work. A
+	// reused context ID can carry a different run ID after a new activation.
+	ExecutionRunID string          `json:"executionRunId,omitempty"`
+	Metadata       json.RawMessage `json:"metadata,omitempty"`
 }
 
 // TriggerSyncRequest is the fixed body the platform POSTs to the integration's

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -186,6 +187,90 @@ func TestEnqueueDerivesBucketFromPartitionKey(t *testing.T) {
 	}
 	if written.ID == "" || written.CreatedAt.IsZero() {
 		t.Fatalf("enqueue returned an incomplete event: %+v", written)
+	}
+}
+
+func TestOutboxBucketRangeMapping(t *testing.T) {
+	store := NewOutboxStore(nil, OutboxConfig{BucketCount: 16})
+	bulk, err := store.BucketRange(240)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := bulk.BucketOf("subject"), 240+store.BucketOf("subject"); got != want {
+		t.Fatalf("bucket = %d, want %d", got, want)
+	}
+	for _, offset := range []int{-1, 241} {
+		if _, err := store.BucketRange(offset); err == nil {
+			t.Fatalf("accepted out-of-bounds offset %d", offset)
+		}
+	}
+}
+
+func TestOutboxBucketRangesIsolateDrainAndReplay(t *testing.T) {
+	ordinary, ctx := testStore(t, OutboxConfig{BucketCount: 2})
+	bulk, err := ordinary.BucketRange(ordinary.BucketCount())
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := enqueue(t, ctx, ordinary, "subject", `{"lane":"first"}`)
+	second := enqueue(t, ctx, bulk, "subject", `{"lane":"second"}`)
+	if second.Bucket != first.Bucket+ordinary.BucketCount() {
+		t.Fatalf("written buckets = %d and %d", first.Bucket, second.Bucket)
+	}
+
+	for _, lane := range []struct {
+		store  *OutboxStore
+		owner  string
+		claims []int
+		event  outbox.Event
+	}{
+		{ordinary, "legacy-relay", []int{0, 1}, first},
+		{bulk, "bulk-relay", []int{2, 3}, second},
+	} {
+		stats, err := lane.store.OutboxStats(ctx)
+		if err != nil || stats.PendingCount != 1 || stats.DeadCount != 0 {
+			t.Fatalf("%s stats = %+v, err = %v", lane.owner, stats, err)
+		}
+		claimed, err := lane.store.ClaimBuckets(ctx, lane.owner, time.Minute)
+		if err != nil || !slices.Equal(claimed, lane.claims) {
+			t.Fatalf("%s claimed %v, err = %v", lane.owner, claimed, err)
+		}
+		_, err = lane.store.PublishBucket(ctx, lane.event.Bucket, lane.owner, 1,
+			func(_ context.Context, got outbox.Event) error {
+				if got.ID != lane.event.ID {
+					t.Errorf("%s got event %s, want %s", lane.owner, got.ID, lane.event.ID)
+				}
+				return outbox.Permanent(errors.New("reject this test event"))
+			})
+		var dead *outbox.DeadLetteredPublishError
+		if !errors.As(err, &dead) {
+			t.Fatalf("%s expected dead letter, got %v", lane.owner, err)
+		}
+	}
+
+	for _, lane := range []struct {
+		store *OutboxStore
+		event outbox.Event
+	}{
+		{ordinary, first},
+		{bulk, second},
+	} {
+		page, err := lane.store.ListDeadLetters(ctx, outbox.DeadLetterListOptions{Limit: 1})
+		if err != nil || len(page.Items) != 1 || page.Items[0].ID != lane.event.ID || page.Next != nil {
+			t.Fatalf("range for bucket %d dead letters = %+v, err = %v", lane.event.Bucket, page, err)
+		}
+	}
+
+	ref := outbox.DeadLetterRef{Bucket: second.Bucket, ID: second.ID, CreatedAt: second.CreatedAt}
+	if _, err := ordinary.ReplayDeadLetter(ctx, ref); err == nil {
+		t.Fatal("original range accepted bulk reference")
+	}
+	state, err := bulk.ReplayDeadLetter(ctx, ref)
+	if err != nil || state != outbox.ReplayRequeued {
+		t.Fatalf("replay = %q, err = %v", state, err)
+	}
+	if got := drain(t, ctx, bulk, second.Bucket, "bulk-relay", 1); len(got) != 1 || got[0].ID != second.ID {
+		t.Fatalf("bulk replay yielded %+v", got)
 	}
 }
 

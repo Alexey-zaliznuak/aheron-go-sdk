@@ -25,6 +25,7 @@ const DefaultOutboxTable = "platform_outbox"
 const DefaultMaxAttempts = 10
 
 const (
+	outboxBucketLimit         = 256 // bucket is Uint8 in all three tables
 	defaultDeadLetterPageSize = 100
 	maxDeadLetterPageSize     = 1000
 )
@@ -72,6 +73,7 @@ type OutboxStore struct {
 	dead   string
 
 	bucketCount int
+	bucketStart int
 	maxAttempts int
 }
 
@@ -103,6 +105,27 @@ func NewOutboxStore(db *ydbsdk.Driver, cfg OutboxConfig) *OutboxStore {
 // BucketCount reports the sharding the store was built with.
 func (s *OutboxStore) BucketCount() int { return s.bucketCount }
 
+// BucketRange returns a view of the same tables over [offset, offset+BucketCount()).
+// Use disjoint ranges for independently drained queues. Once written, each
+// range must keep a relay until its pending rows have been delivered.
+func (s *OutboxStore) BucketRange(offset int) (*OutboxStore, error) {
+	if offset < 0 || offset > outboxBucketLimit-s.bucketCount {
+		return nil, fmt.Errorf("ydb: outbox range at bucket %d with count %d exceeds Uint8 bucket bounds", offset, s.bucketCount)
+	}
+	view := *s
+	view.bucketStart = offset
+	return &view, nil
+}
+
+// BucketOf maps the Kafka partition key to this store's absolute YDB bucket.
+func (s *OutboxStore) BucketOf(partitionKey string) int {
+	return s.bucketStart + outbox.BucketOf(partitionKey, s.bucketCount)
+}
+
+func (s *OutboxStore) containsBucket(bucket int) bool {
+	return bucket >= s.bucketStart && bucket < s.bucketStart+s.bucketCount
+}
+
 func (s *OutboxStore) q(format string, args ...any) string {
 	return s.pragma + fmt.Sprintf(format, args...)
 }
@@ -129,7 +152,7 @@ func (s *OutboxStore) EnqueueTx(ctx context.Context, tx query.TxActor, ev outbox
 		id = parsed
 	}
 	ev.ID = id.String()
-	ev.Bucket = outbox.BucketOf(ev.PartitionKey, s.bucketCount)
+	ev.Bucket = s.BucketOf(ev.PartitionKey)
 	if ev.CreatedAt.IsZero() {
 		ev.CreatedAt = Now()
 	} else {
@@ -176,7 +199,8 @@ func (s *OutboxStore) ClaimBuckets(ctx context.Context, owner string, lease time
 		owned = nil
 
 		rs, err := tx.QueryResultSet(ctx, s.q(`
-SELECT bucket, locked_by, locked_until FROM %s;`, s.leases))
+SELECT bucket, locked_by, locked_until FROM %s WHERE bucket BETWEEN %d AND %d;`,
+			s.leases, s.bucketStart, s.bucketStart+s.bucketCount-1))
 		if err != nil {
 			return err
 		}
@@ -202,7 +226,7 @@ SELECT bucket, locked_by, locked_until FROM %s;`, s.leases))
 
 		stamp := Now()
 		lockedUntil := stamp.Add(lease).Truncate(time.Microsecond)
-		for bucket := 0; bucket < s.bucketCount; bucket++ {
+		for bucket := s.bucketStart; bucket < s.bucketStart+s.bucketCount; bucket++ {
 			current, taken := leases[uint8(bucket)]
 			if taken && current.by != owner && current.until.After(stamp) {
 				continue
@@ -247,6 +271,9 @@ func (s *OutboxStore) PublishBucket(
 	limit int,
 	publish func(context.Context, outbox.Event) error,
 ) (int, error) {
+	if !s.containsBucket(bucket) {
+		return 0, fmt.Errorf("ydb: outbox publish bucket %d is outside [%d,%d)", bucket, s.bucketStart, s.bucketStart+s.bucketCount)
+	}
 	if limit <= 0 {
 		limit = 100
 	}
@@ -633,8 +660,9 @@ DECLARE $limit AS Uint64;
 SELECT bucket, created_at, id, partition_key, topic, payload,
        attempts, last_error, failed_at
 FROM %s
+WHERE bucket BETWEEN %d AND %d
 ORDER BY bucket, created_at, id
-LIMIT $limit;`, s.dead),
+LIMIT $limit;`, s.dead, s.bucketStart, s.bucketStart+s.bucketCount-1),
 			query.WithParameters(ydbsdk.ParamsBuilder().
 				Param("$limit").Uint64(uint64(limit+1)).
 				Build()))
@@ -652,9 +680,10 @@ DECLARE $limit AS Uint64;
 SELECT bucket, created_at, id, partition_key, topic, payload,
        attempts, last_error, failed_at
 FROM %s
-WHERE (bucket, created_at, id) > ($after_bucket, $after_created_at, $after_id)
+WHERE bucket BETWEEN $after_bucket AND %d
+  AND (bucket, created_at, id) > ($after_bucket, $after_created_at, $after_id)
 ORDER BY bucket, created_at, id
-LIMIT $limit;`, s.dead),
+LIMIT $limit;`, s.dead, s.bucketStart+s.bucketCount-1),
 			query.WithParameters(ydbsdk.ParamsBuilder().
 				Param("$after_bucket").Uint8(uint8(opts.After.Bucket)).
 				Param("$after_created_at").Timestamp(createdAt).
@@ -841,8 +870,8 @@ func (s *OutboxStore) OutboxStats(ctx context.Context) (outbox.OutboxStats, erro
 }
 
 func (s *OutboxStore) validateDeadLetterRef(ref outbox.DeadLetterRef) (uuid.UUID, time.Time, error) {
-	if ref.Bucket < 0 || ref.Bucket >= s.bucketCount {
-		return uuid.Nil, time.Time{}, fmt.Errorf("ydb: outbox dead letter bucket %d is outside [0,%d)", ref.Bucket, s.bucketCount)
+	if !s.containsBucket(ref.Bucket) {
+		return uuid.Nil, time.Time{}, fmt.Errorf("ydb: outbox dead letter bucket %d is outside [%d,%d)", ref.Bucket, s.bucketStart, s.bucketStart+s.bucketCount)
 	}
 	if ref.CreatedAt.IsZero() {
 		return uuid.Nil, time.Time{}, fmt.Errorf("ydb: outbox dead letter created_at is required")
@@ -889,7 +918,8 @@ WHERE bucket = $bucket AND created_at = $created_at AND id = $id;`, table),
 
 func (s *OutboxStore) tableStats(ctx context.Context, table, oldestColumn string) (uint64, *time.Time, error) {
 	row, err := s.db.Query().QueryRow(ctx, s.q(`
-SELECT COUNT(*), MIN(%s) FROM %s;`, oldestColumn, table))
+SELECT COUNT(*), MIN(%s) FROM %s WHERE bucket BETWEEN %d AND %d;`,
+		oldestColumn, table, s.bucketStart, s.bucketStart+s.bucketCount-1))
 	if err != nil {
 		return 0, nil, err
 	}

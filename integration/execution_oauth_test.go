@@ -146,6 +146,90 @@ func TestExecutionOAuthTypedMethods(t *testing.T) {
 	}
 }
 
+func TestExecutionOAuthResolveTrafficClass(t *testing.T) {
+	ec := ExecutionContext{ID: "context", StepID: "step", Version: 4, ProjectID: executionOAuthProject}
+	if err := json.Unmarshal([]byte(`{"trafficClass":"bulk","executionRunId":"run-1"}`), &ec); err != nil {
+		t.Fatal(err)
+	}
+	if ec.TrafficClass != TrafficClassBulk || ec.ExecutionRunID != "run-1" {
+		t.Fatalf("decoded context = %+v", ec)
+	}
+
+	for _, tc := range []struct {
+		name        string
+		mode        string
+		variables   map[string]any
+		options     ResolveOptions
+		wantRequest bool
+	}{
+		{name: "legacy resolve", wantRequest: true},
+		{name: "legacy reactivate", mode: "reactivate", wantRequest: true},
+		{name: "keyed automatic resolve", options: ResolveOptions{IdempotencyKey: "delivery", TrafficClass: TrafficClassBulk}, wantRequest: true},
+		{name: "keyed interactive reactivate", mode: "reactivate", options: ResolveOptions{IdempotencyKey: "click", TrafficClass: TrafficClassInteractive}, wantRequest: true},
+		{name: "interactive resolve with variables", variables: map[string]any{"reply": "hello"}, options: ResolveOptions{TrafficClass: TrafficClassInteractive}, wantRequest: true},
+		{name: "interactive reactivate with variables", mode: "reactivate", variables: map[string]any{"reply": "hello"}, options: ResolveOptions{TrafficClass: TrafficClassInteractive}, wantRequest: true},
+		{name: "unknown resolve class", options: ResolveOptions{TrafficClass: "urgent"}},
+		{name: "unknown reactivate class", mode: "reactivate", options: ResolveOptions{TrafficClass: "BULK"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tokenBytes := make([]byte, 32)
+			tokenBytes[0] = 1
+			token := "aho_" + base64.RawURLEncoding.EncodeToString(tokenBytes)
+			c, _ := executionOAuthFixture(t, func(w http.ResponseWriter, r *http.Request) {
+				if !tc.wantRequest {
+					t.Error("invalid traffic class must fail before requesting a token")
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				if r.URL.Path == "/oauth/token" {
+					executionOAuthIssue(t, w, r, 1)
+					wantScope := "integration.resolve"
+					if len(tc.variables) != 0 {
+						wantScope += " variables.write"
+					}
+					if r.Form.Get("scope") != wantScope {
+						t.Errorf("scope = %q, want %q", r.Form.Get("scope"), wantScope)
+					}
+					return
+				}
+				if r.Method != http.MethodPost || r.URL.Path != "/api/execution/integrations/resolve" || r.Header.Get("Authorization") != "Bearer "+token {
+					t.Error("resolve must use the execution endpoint and its installation token")
+				}
+				var body map[string]json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode resolve body: %v", err)
+				}
+				class, exists := body["trafficClass"]
+				if tc.options.TrafficClass == "" {
+					if exists {
+						t.Errorf("legacy trafficClass = %s, want it omitted", class)
+					}
+				} else if string(class) != `"`+tc.options.TrafficClass+`"` {
+					t.Errorf("trafficClass = %s, want %q", class, tc.options.TrafficClass)
+				}
+				var wantMode string
+				if tc.mode != "" {
+					wantMode = `"` + tc.mode + `"`
+				}
+				if string(body["mode"]) != wantMode {
+					t.Errorf("mode = %s, want %q", body["mode"], tc.mode)
+				}
+				if _, exists := body["executionRunId"]; exists {
+					t.Error("executionRunId must come from the server")
+				}
+				w.WriteHeader(http.StatusAccepted)
+			})
+			call := c.Steps.ResolveWithOptions
+			if tc.mode == "reactivate" {
+				call = c.Steps.ReactivateWithOptions
+			}
+			if err := call(t.Context(), ec, "ok", tc.variables, tc.options); (err == nil) != tc.wantRequest {
+				t.Fatalf("resolve error = %v", err)
+			}
+		})
+	}
+}
+
 func TestExecutionOAuthTriggerEventAndSuppression(t *testing.T) {
 	var gotEvent ActivationEvent
 	var gotMetadata json.RawMessage
@@ -177,7 +261,7 @@ func TestExecutionOAuthTriggerEventAndSuppression(t *testing.T) {
 	})
 	result, err := c.Triggers.ActivateDetailed(t.Context(), ActivateParams{
 		ProjectID: executionOAuthProject, SubjectID: "subject", ActivationKey: "comment",
-		Event: &ActivationEvent{EventID: "instagram:1", Kind: "messengers.postComment", Version: 1, Data: json.RawMessage(`{"commentId":"1"}`)},
+		Event:    &ActivationEvent{EventID: "instagram:1", Kind: "messengers.postComment", Version: 1, Data: json.RawMessage(`{"commentId":"1"}`)},
 		Metadata: json.RawMessage(`{"startEvent":{"id":"instagram:1"}}`), IdempotencyKey: "instagram:1",
 	})
 	if err != nil {

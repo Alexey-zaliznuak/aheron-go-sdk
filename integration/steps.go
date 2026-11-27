@@ -27,9 +27,10 @@ type resolveBody struct {
 	StepID             string          `json:"stepId,omitempty"`
 	IdempotencyKey     string          `json:"idempotencyKey,omitempty"`
 	Metadata           json.RawMessage `json:"metadata,omitempty"`
+	TrafficClass       string          `json:"trafficClass,omitempty"`
 }
 
-// ResolveOptions controls optional delivery guarantees for ResolveWithOptions
+// ResolveOptions controls optional continuation parameters for ResolveWithOptions
 // and ReactivateWithOptions. IdempotencyKey is scoped by the platform to this
 // integration and execution context. Reusing it with the same request replays
 // the original accepted outcome; reusing it with different request data is a
@@ -38,6 +39,10 @@ type ResolveOptions struct {
 	IdempotencyKey string
 	// Metadata replaces this integration's namespace in the branch metadata.
 	Metadata json.RawMessage
+	// TrafficClass selects the class of the continuation. Use the recorded
+	// source class for an automatic event, or TrafficClassInteractive for a
+	// verified user interaction. Empty leaves inheritance to execution.
+	TrafficClass string
 }
 
 // Resolve advances a parked integrationAction context through the chosen output.
@@ -78,6 +83,7 @@ func (c *StepsClient) ResolveWithOptions(ctx context.Context, ec ExecutionContex
 		Variables:          variables,
 		IdempotencyKey:     options.IdempotencyKey,
 		Metadata:           options.Metadata,
+		TrafficClass:       options.TrafficClass,
 	})
 	if err != nil {
 		return fmt.Errorf("integration: marshal resolve: %w", err)
@@ -129,6 +135,7 @@ func (c *StepsClient) ReactivateWithOptions(ctx context.Context, ec ExecutionCon
 		StepID:             ec.StepID,
 		IdempotencyKey:     options.IdempotencyKey,
 		Metadata:           options.Metadata,
+		TrafficClass:       options.TrafficClass,
 	})
 	if err != nil {
 		return fmt.Errorf("integration: marshal reactivate: %w", err)
@@ -141,6 +148,11 @@ func (c *StepsClient) ReactivateWithOptions(ctx context.Context, ec ExecutionCon
 }
 
 func validateResolveOptions(operation string, variables map[string]any, options ResolveOptions) error {
+	switch options.TrafficClass {
+	case "", TrafficClassBulk, TrafficClassInteractive:
+	default:
+		return fmt.Errorf("integration: %s traffic class must be bulk or interactive", operation)
+	}
 	if options.IdempotencyKey == "" {
 		return nil
 	}
