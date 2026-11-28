@@ -22,6 +22,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/Alexey-zaliznuak/aheron-go-sdk/crmdefinitions"
 	"github.com/Alexey-zaliznuak/aheron-go-sdk/schemetransfer"
 )
 
@@ -148,7 +149,8 @@ type Quota struct {
 //
 // A zero path means "this integration does not offer that endpoint".
 type Manifest struct {
-	Quotas []Quota
+	CRMVariableDefinitions crmdefinitions.Set
+	Quotas                 []Quota
 
 	// MCPPath is an optional project-scoped MCP endpoint on this integration origin.
 	MCPPath string
@@ -194,6 +196,7 @@ type Manifest struct {
 // absolute URLs; an endpoint the manifest does not offer is omitted, which the
 // platform reads as "clear it".
 type manifestBody struct {
+	CRMVariableDefinitions   crmdefinitions.Set                       `json:"crmVariableDefinitions,omitempty"`
 	Quotas                   []Quota                                  `json:"quotas,omitempty"`
 	MCPURL                   string                                   `json:"mcpUrl,omitempty"`
 	ImportCopyFileURL        string                                   `json:"importCopyFileUrl,omitempty"`
@@ -251,6 +254,9 @@ var validKinds = map[Kind]bool{KindAction: true, KindTrigger: true, KindSubflow:
 // baseURL. It reports the first problem it finds; every check is cheap and
 // local, so a broken manifest is caught before the request is signed.
 func (m Manifest) resolve(baseURL string) (manifestBody, error) {
+	if err := m.CRMVariableDefinitions.Validate(); err != nil {
+		return manifestBody{}, err
+	}
 	if len(m.Quotas) > 500 {
 		return manifestBody{}, fmt.Errorf("integration: too many quota declarations")
 	}
@@ -411,8 +417,9 @@ func (m Manifest) resolve(baseURL string) (manifestBody, error) {
 	}
 
 	return manifestBody{
-		Quotas:            m.Quotas,
-		ImportCopyFileURL: importFileURL, ResourceValuesURL: resourceURL, PrepareCopyURL: prepareURL, ValidateCopySettingsURL: validateURL, ResourceSources: m.ResourceSources,
+		CRMVariableDefinitions: m.CRMVariableDefinitions,
+		Quotas:                 m.Quotas,
+		ImportCopyFileURL:      importFileURL, ResourceValuesURL: resourceURL, PrepareCopyURL: prepareURL, ValidateCopySettingsURL: validateURL, ResourceSources: m.ResourceSources,
 		ConsoleURL:               consoleURL,
 		ConsolePages:             pages,
 		InstallationLifecycleURL: lifecycleURL,
